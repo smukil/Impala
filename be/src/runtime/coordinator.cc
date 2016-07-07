@@ -48,8 +48,8 @@
 #include "gen-cpp/ImpalaInternalService_types.h"
 #include "gen-cpp/Partitions_types.h"
 #include "gen-cpp/PlanNodes_types.h"
+#include "kudu/util/net/net_util.h"
 #include "runtime/backend-client.h"
-#include "runtime/client-cache.h"
 #include "runtime/data-stream-mgr.h"
 #include "runtime/data-stream-sender.h"
 #include "runtime/exec-env.h"
@@ -61,6 +61,9 @@
 #include "runtime/tuple-row.h"
 #include "scheduling/scheduler.h"
 #include "service/fragment-exec-state.h"
+#include "service/prototest.pb.h"
+#include "service/prototest.proxy.h"
+#include "rpc/rpc-mgr.h"
 #include "util/bloom-filter.h"
 #include "util/container-util.h"
 #include "util/counting-barrier.h"
@@ -86,6 +89,19 @@ using boost::algorithm::token_compress_on;
 using boost::algorithm::split;
 using boost::filesystem::path;
 using std::unique_ptr;
+
+using kudu::rpc_test::CancelPlanFragmentRequestPB;
+using kudu::rpc_test::CancelPlanFragmentResponsePB;
+using kudu::rpc_test::ExecPlanFragmentRequestPB;
+using kudu::rpc_test::ExecPlanFragmentResponsePB;
+using kudu::rpc_test::BloomFilterPB;
+using kudu::rpc_test::PublishFilterRequestPB;
+using kudu::rpc_test::PublishFilterResponsePB;
+using kudu::rpc_test::UpdateFilterRequestPB;
+using kudu::rpc_test::UpdateFilterResponsePB;
+using kudu::rpc_test::ImpalaKRPCServiceProxy;
+using kudu::rpc::RpcController;
+using kudu::Sockaddr;
 
 DECLARE_int32(be_port);
 DECLARE_string(hostname);
@@ -273,7 +289,7 @@ class Coordinator::FilterState {
       src_(src), pending_count_(0), first_arrival_time_(0L), completion_time_(0L),
       disabled_(false) { }
 
-  TBloomFilter* bloom_filter() { return bloom_filter_.get(); }
+  BloomFilterPB* bloom_filter() { return bloom_filter_.get(); }
   boost::unordered_set<int>* src_fragment_instance_state_idxs() {
     return &src_fragment_instance_state_idxs_;
   }
@@ -292,7 +308,7 @@ class Coordinator::FilterState {
 
   /// Aggregates partitioned join filters and updates memory consumption.
   /// Disables filter if always_true filter is received or OOM is hit.
-  void ApplyUpdate(const TUpdateFilterParams& params, Coordinator* coord);
+  void ApplyUpdate(const UpdateFilterRequestPB& params, Coordinator* coord);
 
   /// Disables a filter. A disabled filter consumes no memory.
   void Disable(MemTracker* tracker);
@@ -317,7 +333,7 @@ class Coordinator::FilterState {
   /// In order to avoid memory spikes, an incoming filter is moved (vs. copied) to the
   /// output structure in the case of a broadcast join. Similarly, for partitioned joins,
   /// the filter is moved from the following member to the output structure.
-  std::unique_ptr<TBloomFilter> bloom_filter_;
+  std::unique_ptr<BloomFilterPB> bloom_filter_;
 
   /// Time at which first local filter arrived.
   int64_t first_arrival_time_;
@@ -1288,21 +1304,24 @@ void Coordinator::ExecRemoteFInstance(
   lock_guard<mutex> l(*exec_state->lock());
   int64_t start = MonotonicMillis();
 
-  Status client_connect_status;
-  ImpalaBackendConnection backend_client(exec_env_->impalad_client_cache(),
-      exec_state->impalad_address(), &client_connect_status);
-  if (!client_connect_status.ok()) {
-    exec_state->SetInitialStatus(client_connect_status, false);
-    return;
-  }
+
+  unique_ptr<ImpalaKRPCServiceProxy> proxy;
+  RETURN_VOID_IF_ERROR(ExecEnv::GetInstance()->rpc_mgr()->GetProxy(
+      exec_state->impalad_address(), &proxy));
+  ExecPlanFragmentRequestPB proto_request;
+  RETURN_VOID_IF_ERROR(SerializeThriftToProtoWrapper(&rpc_params, true, &proto_request));
+
+  RpcController controller;
+  ExecPlanFragmentResponsePB proto_response;
+  proxy->ExecPlanFragment(proto_request, &proto_response, &controller);
 
   TExecPlanFragmentResult thrift_result;
-  Status rpc_status = backend_client.DoRpc(&ImpalaBackendClient::ExecPlanFragment,
-      rpc_params, &thrift_result);
+  DeserializeThriftFromProtoWrapper(proto_response, true, &thrift_result);
+
   exec_state->set_rpc_latency(MonotonicMillis() - start);
 
   const string ERR_TEMPLATE = "ExecPlanRequest rpc query_id=$0 instance_id=$1 failed: $2";
-
+  Status rpc_status = FromKuduStatus(controller.status());
   if (!rpc_status.ok()) {
     const string& err_msg = Substitute(ERR_TEMPLATE, PrintId(query_id()),
         PrintId(exec_state->fragment_instance_id()), rpc_status.msg().msg());
@@ -1373,39 +1392,40 @@ void Coordinator::CancelFragmentInstances() {
 
     // if we get an error while trying to get a connection to the backend,
     // keep going
-    Status status;
-    ImpalaBackendConnection backend_client(
-        exec_env_->impalad_client_cache(), exec_state->impalad_address(), &status);
-    if (!status.ok()) continue;
+    unique_ptr<ImpalaKRPCServiceProxy> proxy;
+    RETURN_VOID_IF_ERROR(ExecEnv::GetInstance()->rpc_mgr()->GetProxy(
+        exec_state->impalad_address(), &proxy));
+
     ++num_cancelled;
     TCancelPlanFragmentParams params;
     params.protocol_version = ImpalaInternalServiceVersion::V1;
     params.__set_fragment_instance_id(exec_state->fragment_instance_id());
+
+    CancelPlanFragmentRequestPB proto_request;
+    SerializeThriftToProtoWrapper(&params, true, &proto_request);
+
     TCancelPlanFragmentResult res;
     VLOG_QUERY << "sending CancelPlanFragment rpc for instance_id="
                << exec_state->fragment_instance_id() << " backend="
                << exec_state->impalad_address();
-    Status rpc_status;
-    // Try to send the RPC 3 times before failing.
-    bool retry_is_safe;
-    for (int i = 0; i < 3; ++i) {
-      rpc_status = backend_client.DoRpc(&ImpalaBackendClient::CancelPlanFragment,
-          params, &res, &retry_is_safe);
-      if (rpc_status.ok() || !retry_is_safe) break;
-    }
-    if (!rpc_status.ok()) {
-      exec_state->status()->MergeStatus(rpc_status);
-      stringstream msg;
-      msg << "CancelPlanFragment rpc query_id=" << query_id_
-          << " instance_id=" << exec_state->fragment_instance_id()
-          << " failed: " << rpc_status.msg().msg();
-      // make a note of the error status, but keep on cancelling the other fragments
-      exec_state->status()->AddDetail(msg.str());
-      continue;
-    }
-    if (res.status.status_code != TErrorCode::OK) {
-      exec_state->status()->AddDetail(join(res.status.error_msgs, "; "));
-    }
+
+    RpcController controller;
+    CancelPlanFragmentResponsePB proto_response;
+    proxy->CancelPlanFragment(proto_request, &proto_response, &controller);
+
+    // if (!rpc_status.ok()) {
+    //   exec_state->status()->MergeStatus(rpc_status);
+    //   stringstream msg;
+    //   msg << "CancelPlanFragment rpc query_id=" << query_id_
+    //       << " instance_id=" << exec_state->fragment_instance_id()
+    //       << " failed: " << rpc_status.msg().msg();
+    //   // make a note of the error status, but keep on cancelling the other fragments
+    //   exec_state->status()->AddDetail(msg.str());
+    //   continue;
+    // }
+    // if (res.status.status_code != TErrorCode::OK) {
+    //   exec_state->status()->AddDetail(join(res.status.error_msgs, "; "));
+    // }
   }
   VLOG_QUERY << Substitute(
       "CancelFragmentInstances() query_id=$0, tried to cancel $1 fragment instances",
@@ -1866,29 +1886,6 @@ void Coordinator::SetExecPlanDescriptorTable(const TPlanFragment& fragment,
   rpc_params->query_ctx.__set_desc_tbl(thrift_desc_tbl);
 }
 
-namespace {
-
-// Make a PublishFilter rpc to 'impalad' for given fragment_instance_id
-// and params.
-// This takes by-value parameters because we cannot guarantee that the originating
-// coordinator won't be destroyed while this executes.
-// TODO: switch to references when we fix the lifecycle problems of coordinators.
-void DistributeFilters(shared_ptr<TPublishFilterParams> params,
-    TNetworkAddress impalad, TUniqueId fragment_instance_id) {
-  Status status;
-  ImpalaBackendConnection backend_client(
-      ExecEnv::GetInstance()->impalad_client_cache(), impalad, &status);
-  if (!status.ok()) return;
-  // Make a local copy of the shared 'master' set of parameters
-  TPublishFilterParams local_params(*params);
-  local_params.dst_instance_id = fragment_instance_id;
-  local_params.__set_bloom_filter(params->bloom_filter);
-  TPublishFilterResult res;
-  backend_client.DoRpc(&ImpalaBackendClient::PublishFilter, local_params, &res);
-};
-
-}
-
 void Coordinator::TearDown() {
   DCHECK(!torn_down_) << "Coordinator::TearDown() may not be called twice";
   torn_down_ = true;
@@ -1908,7 +1905,7 @@ void Coordinator::TearDown() {
   if (root_sink_ != nullptr) root_sink_->CloseConsumer();
 }
 
-void Coordinator::UpdateFilter(const TUpdateFilterParams& params) {
+void Coordinator::UpdateFilter(const UpdateFilterRequestPB* params) {
   DCHECK_NE(filter_mode_, TRuntimeFilterMode::OFF)
       << "UpdateFilter() called although runtime filters are disabled";
   DCHECK(exec_complete_barrier_.get() != NULL)
@@ -1917,14 +1914,13 @@ void Coordinator::UpdateFilter(const TUpdateFilterParams& params) {
   DCHECK(filter_routing_table_complete_)
       << "Filter received before routing table complete";
 
-  // Make a 'master' copy that will be shared by all concurrent delivery RPC attempts.
-  shared_ptr<TPublishFilterParams> rpc_params(new TPublishFilterParams());
+  PublishFilterRequestPB rpc_params;
   unordered_set<int> target_fragment_instance_state_idxs;
   {
     lock_guard<SpinLock> l(filter_lock_);
-    FilterRoutingTable::iterator it = filter_routing_table_.find(params.filter_id);
+    FilterRoutingTable::iterator it = filter_routing_table_.find(params->filter_id());
     if (it == filter_routing_table_.end()) {
-      LOG(INFO) << "Could not find filter with id: " << params.filter_id;
+      LOG(INFO) << "Could not find filter with id: " << params->filter_id();
       return;
     }
     FilterState* state = &it->second;
@@ -1945,7 +1941,7 @@ void Coordinator::UpdateFilter(const TUpdateFilterParams& params) {
     }
     filter_updates_received_->Add(1);
 
-    state->ApplyUpdate(params, this);
+    state->ApplyUpdate(*params, this);
 
     if (state->pending_count() > 0 && !state->disabled()) return;
     // At this point, we either disabled this filter or aggregation is complete.
@@ -1966,36 +1962,47 @@ void Coordinator::UpdateFilter(const TUpdateFilterParams& params) {
     if (state->bloom_filter() != NULL) {
       // Complete filter case.
       // TODO: Replace with move() in Thrift 0.9.3.
-      TBloomFilter* aggregated_filter = state->bloom_filter();
-      filter_mem_tracker_->Release(aggregated_filter->directory.size());
-      swap(rpc_params->bloom_filter, *aggregated_filter);
-      DCHECK_EQ(aggregated_filter->directory.size(), 0);
+      BloomFilterPB* aggregated_filter = state->bloom_filter();
+      // TODO -> was this masking a bug?
+      // filter_mem_tracker_->Release(aggregated_filter->directory().size());
+      rpc_params.set_allocated_bloom_filter(new BloomFilterPB(*aggregated_filter));
+      // swap(rpc_params.bloom_filter, *aggregated_filter);
+      //      DCHECK_EQ(aggregated_filter->directory().size(), 0);
     } else {
       // Disabled filter case (due to OOM or due to receiving an always_true filter).
-      rpc_params->bloom_filter.always_true = true;
+      rpc_params.mutable_bloom_filter()->set_always_true(true);
     }
 
     // Filter is complete, and can be released.
     state->Disable(filter_mem_tracker_.get());
-    DCHECK_EQ(state->bloom_filter(), reinterpret_cast<TBloomFilter*>(NULL));
+    DCHECK_EQ(state->bloom_filter(), reinterpret_cast<BloomFilterPB*>(NULL));
   }
 
-  rpc_params->filter_id = params.filter_id;
+  rpc_params.set_filter_id(params->filter_id());
 
   for (int target_idx: target_fragment_instance_state_idxs) {
     FragmentInstanceState* fragment_inst = fragment_instance_states_[target_idx];
     DCHECK(fragment_inst != NULL) << "Missing fragment instance: " << target_idx;
-    exec_env_->rpc_pool()->Offer(bind<void>(DistributeFilters, rpc_params,
-        fragment_inst->impalad_address(), fragment_inst->fragment_instance_id()));
-        // TODO: switch back to the following once we fixed the lifecycle
-        // problems of Coordinator
-        //std::cref(fragment_inst->impalad_address()),
-        //std::cref(fragment_inst->fragment_instance_id())));
+    rpc_params.mutable_dst_instance_id()->set_lo(fragment_inst->fragment_instance_id().lo);
+    rpc_params.mutable_dst_instance_id()->set_hi(fragment_inst->fragment_instance_id().hi);
+
+    unique_ptr<ImpalaKRPCServiceProxy> proxy;
+    RETURN_VOID_IF_ERROR(ExecEnv::GetInstance()->rpc_mgr()->GetProxy(
+        fragment_inst->impalad_address(), &proxy));
+    // HNR -> would be nice to get this working so that deletions are implicit.
+    // unique_ptr<RpcController> controller = make_unique<RpcController>();
+    // unique_ptr<PublishFilterResponsePB> response = make_unique<PublishFilterResponsePB>();
+    // auto cb = [controller2 = std::move(controller), response2 = std::move(response)] () mutable { };
+    RpcController* controller = new RpcController();
+    PublishFilterResponsePB* response = new PublishFilterResponsePB();
+    auto cb = [controller, response] () { delete controller; delete response; };
+    proxy->PublishFilterAsync(rpc_params, response, controller, cb);
   }
 }
 
 
-void Coordinator::FilterState::ApplyUpdate(const TUpdateFilterParams& params,
+
+void Coordinator::FilterState::ApplyUpdate(const UpdateFilterRequestPB& params,
     Coordinator* coord) {
   DCHECK_GT(pending_count_, 0);
   DCHECK_EQ(completion_time_, 0L);
@@ -2004,10 +2011,10 @@ void Coordinator::FilterState::ApplyUpdate(const TUpdateFilterParams& params,
   }
 
   --pending_count_;
-  if (params.bloom_filter.always_true) {
+  if (params.bloom_filter().always_true()) {
     Disable(coord->filter_mem_tracker_.get());
   } else if (bloom_filter_.get() == NULL) {
-    int64_t heap_space = params.bloom_filter.directory.size();
+    int64_t heap_space = params.bloom_filter().directory().size();
     if (!coord->filter_mem_tracker_.get()->TryConsume(heap_space)) {
       VLOG_QUERY << "Not enough memory to allocate filter: "
                  << PrettyPrinter::Print(heap_space, TUnit::BYTES)
@@ -2015,18 +2022,21 @@ void Coordinator::FilterState::ApplyUpdate(const TUpdateFilterParams& params,
       // Disable, as one missing update means a correct filter cannot be produced.
       Disable(coord->filter_mem_tracker_.get());
     } else {
-      bloom_filter_.reset(new TBloomFilter());
+      bloom_filter_.reset(new BloomFilterPB(params.bloom_filter()));
       // Workaround for fact that parameters are const& for Thrift RPCs - yet we want to
       // move the payload from the request rather than copy it and take double the memory
       // cost. After this point, params.bloom_filter is an empty filter and should not be
       // read.
-      TBloomFilter* non_const_filter =
-          &const_cast<TBloomFilter&>(params.bloom_filter);
-      swap(*bloom_filter_.get(), *non_const_filter);
-      DCHECK_EQ(non_const_filter->directory.size(), 0);
+
+      // HNR TODO MOVE
+
+      // BloomFilterPB* non_const_filter =
+      //     &const_cast<BloomFilterPB&>(params.bloom_filter());
+      // swap(*bloom_filter_.get(), *non_const_filter);
+      // DCHECK_EQ(non_const_filter->directory.size(), 0);
     }
   } else {
-    BloomFilter::Or(params.bloom_filter, bloom_filter_.get());
+    BloomFilter::Or(params.bloom_filter(), bloom_filter_.get());
   }
 
   if (pending_count_ == 0 || disabled_) {
@@ -2037,7 +2047,7 @@ void Coordinator::FilterState::ApplyUpdate(const TUpdateFilterParams& params,
 void Coordinator::FilterState::Disable(MemTracker* tracker) {
   disabled_ = true;
   if (bloom_filter_.get() == NULL) return;
-  int64_t heap_space = bloom_filter_.get()->directory.size();
+  int64_t heap_space = bloom_filter_.get()->directory().size();
   tracker->Release(heap_space);
   bloom_filter_.reset();
 }

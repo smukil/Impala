@@ -21,6 +21,7 @@
 #include <thrift/protocol/TDebugProtocol.h>
 
 #include "common/logging.h"
+#include "exec/kudu-util.h"
 #include "exprs/expr.h"
 #include "exprs/expr-context.h"
 #include "gutil/strings/substitute.h"
@@ -39,6 +40,14 @@
 #include "rpc/thrift-client.h"
 #include "rpc/thrift-util.h"
 
+#include "service/impala-server.h"
+#include "rpc/rpc-mgr.h"
+#include "service/prototest.pb.h"
+#include "service/prototest.proxy.h"
+#include "kudu/rpc/rpc_controller.h"
+#include "kudu/util/net/sockaddr.h"
+#include "kudu/util/net/net_util.h"
+
 #include "gen-cpp/Types_types.h"
 #include "gen-cpp/ImpalaInternalService.h"
 #include "gen-cpp/ImpalaInternalService_types.h"
@@ -49,6 +58,17 @@ using boost::condition_variable;
 using namespace apache::thrift;
 using namespace apache::thrift::protocol;
 using namespace apache::thrift::transport;
+
+using kudu::HostPort;
+using kudu::Sockaddr;
+
+using kudu::rpc_test::TransmitDataRequestPB;
+using kudu::rpc_test::TransmitDataResponsePB;
+using kudu::rpc_test::RowBatchPB;
+using kudu::rpc_test::ImpalaKRPCServiceProxy;
+using kudu::rpc::RpcController;
+
+DECLARE_int32(be_port);
 
 namespace impala {
 
@@ -196,28 +216,34 @@ void DataStreamSender::Channel::TransmitDataHelper(const TRowBatch* batch) {
   VLOG_ROW << "Channel::TransmitData() instance_id=" << fragment_instance_id_
            << " dest_node=" << dest_node_id_
            << " #rows=" << batch->num_rows;
-  TTransmitDataParams params;
-  params.protocol_version = ImpalaInternalServiceVersion::V1;
-  params.__set_dest_fragment_instance_id(fragment_instance_id_);
-  params.__set_dest_node_id(dest_node_id_);
-  params.__set_row_batch(*batch);  // yet another copy
-  params.__set_eos(false);
-  params.__set_sender_id(parent_->sender_id_);
 
-  ImpalaBackendConnection client(runtime_state_->impalad_client_cache(),
-      address_, &rpc_status_);
-  if (!rpc_status_.ok()) return;
+  TransmitDataRequestPB request;
+  request.mutable_dest_fragment_instance_id()->set_lo(fragment_instance_id_.lo);
+  request.mutable_dest_fragment_instance_id()->set_hi(fragment_instance_id_.hi);
+  request.set_dest_node_id(dest_node_id_);
+  RowBatchPB* row_batch_pb = request.mutable_row_batch();
+  row_batch_pb->set_num_rows(batch->num_rows);
+  for (int32_t tuple: batch->row_tuples) row_batch_pb->add_row_tuples(tuple);
+  for (int32_t offset: batch->tuple_offsets) row_batch_pb->add_tuple_offsets(offset);
+  row_batch_pb->set_tuple_data(batch->tuple_data);
+  row_batch_pb->set_uncompressed_size(batch->uncompressed_size);
+  row_batch_pb->set_compression_type(batch->compression_type);
+  request.set_eos(false);
+  request.set_sender_id(parent_->sender_id_);
 
-  TTransmitDataResult res;
-  client->SetTransmitDataCounter(parent_->thrift_transmit_timer_);
-  rpc_status_ = DoTransmitDataRpc(&client, params, &res);
-  client->ResetTransmitDataCounter();
-  if (!rpc_status_.ok()) return;
+  unique_ptr<ImpalaKRPCServiceProxy> proxy;
+  ExecEnv::GetInstance()->rpc_mgr()->GetProxy(address_, &proxy);
+
+  RpcController controller;
+  TransmitDataResponsePB response;
+  // TODO: Is this the right status? Or controller.status()?
+  kudu::Status rpc_status = proxy->TransmitData(request, &response, &controller);
+
   COUNTER_ADD(parent_->profile_->total_time_counter(),
       parent_->thrift_transmit_timer_->LapTime());
 
-  if (res.status.status_code != TErrorCode::OK) {
-    rpc_status_ = res.status;
+  if (!rpc_status.ok()) {
+    rpc_status_ = Status(Substitute("$0: $1", "RPC failure", rpc_status.ToString()));
   } else {
     num_data_bytes_sent_ += RowBatch::GetBatchSize(*batch);
     VLOG_ROW << "incremented #data_bytes_sent="
@@ -295,27 +321,24 @@ Status DataStreamSender::Channel::FlushAndSendEos(RuntimeState* state) {
 
   RETURN_IF_ERROR(GetSendStatus());
 
-  Status client_cnxn_status;
-  ImpalaBackendConnection client(runtime_state_->impalad_client_cache(),
-      address_, &client_cnxn_status);
-  RETURN_IF_ERROR(client_cnxn_status);
+  TransmitDataRequestPB request;
+  request.mutable_dest_fragment_instance_id()->set_lo(fragment_instance_id_.lo);
+  request.mutable_dest_fragment_instance_id()->set_hi(fragment_instance_id_.hi);
+  request.set_dest_node_id(dest_node_id_);
+  request.mutable_row_batch()->set_num_rows(0);
+  request.mutable_row_batch()->set_tuple_data("");
+  request.mutable_row_batch()->set_compression_type(0);
+  request.mutable_row_batch()->set_uncompressed_size(0);
+  request.set_eos(true);
+  request.set_sender_id(parent_->sender_id_);
 
-  TTransmitDataParams params;
-  params.protocol_version = ImpalaInternalServiceVersion::V1;
-  params.__set_dest_fragment_instance_id(fragment_instance_id_);
-  params.__set_dest_node_id(dest_node_id_);
-  params.__set_sender_id(parent_->sender_id_);
-  params.__set_eos(true);
-  TTransmitDataResult res;
+  unique_ptr<ImpalaKRPCServiceProxy> proxy;
+  RETURN_IF_ERROR(ExecEnv::GetInstance()->rpc_mgr()->GetProxy(address_,&proxy));
+  RpcController controller;
+  TransmitDataResponsePB response;
 
-  VLOG_RPC << "calling TransmitData(eos=true) to terminate channel.";
-  rpc_status_ = DoTransmitDataRpc(&client, params, &res);
-  if (!rpc_status_.ok()) {
-    return Status(rpc_status_.code(),
-       Substitute("TransmitData(eos=true) to $0 failed:\n $1",
-        TNetworkAddressToString(address_), rpc_status_.msg().msg()));
-  }
-  return Status(res.status);
+  KUDU_RETURN_IF_ERROR(proxy->TransmitData(request, &response, &controller), "RPC Error");
+  return Status::OK();
 }
 
 void DataStreamSender::Channel::Teardown(RuntimeState* state) {

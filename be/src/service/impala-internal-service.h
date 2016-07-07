@@ -18,68 +18,39 @@
 #ifndef IMPALA_SERVICE_IMPALA_INTERNAL_SERVICE_H
 #define IMPALA_SERVICE_IMPALA_INTERNAL_SERVICE_H
 
-#include "gen-cpp/ImpalaInternalService.h"
-#include "gen-cpp/ImpalaInternalService_types.h"
-#include "service/impala-server.h"
 #include "service/fragment-mgr.h"
-#include "testutil/fault-injection-util.h"
+#include "service/prototest.pb.h"
+#include "service/prototest.service.h"
 
 namespace impala {
 
-/// Proxies Thrift RPC requests onto their implementing objects for the
+/// Proxies RPC requests onto their implementing objects for the
 /// ImpalaInternalService service.
-class ImpalaInternalService : public ImpalaInternalServiceIf {
+class ImpalaKRPCServiceImpl : public kudu::rpc_test::ImpalaKRPCServiceIf {
  public:
-  ImpalaInternalService() {
-    impala_server_ = ExecEnv::GetInstance()->impala_server();
-    DCHECK(impala_server_ != nullptr);
-    fragment_mgr_ = ExecEnv::GetInstance()->fragment_mgr();
-    DCHECK(fragment_mgr_ != nullptr);
+  ImpalaKRPCServiceImpl(const scoped_refptr<kudu::MetricEntity>& entity,
+      const scoped_refptr<kudu::rpc::ResultTracker> tracker) : ImpalaKRPCServiceIf(entity, tracker) {
   }
 
-  virtual void ExecPlanFragment(TExecPlanFragmentResult& return_val,
-      const TExecPlanFragmentParams& params) {
-    FAULT_INJECTION_RPC_DELAY(RPC_EXECPLANFRAGMENT);
-    fragment_mgr_->ExecPlanFragment(params).SetTStatus(&return_val);
-  }
+  virtual void TransmitData(const kudu::rpc_test::TransmitDataRequestPB* request,
+      kudu::rpc_test::TransmitDataResponsePB* response, kudu::rpc::RpcContext* context);
 
-  virtual void CancelPlanFragment(TCancelPlanFragmentResult& return_val,
-      const TCancelPlanFragmentParams& params) {
-    FAULT_INJECTION_RPC_DELAY(RPC_CANCELPLANFRAGMENT);
-    fragment_mgr_->CancelPlanFragment(return_val, params);
-  }
+  virtual void PublishFilter(const kudu::rpc_test::PublishFilterRequestPB* request,
+      kudu::rpc_test::PublishFilterResponsePB* response, kudu::rpc::RpcContext* context);
 
-  virtual void ReportExecStatus(TReportExecStatusResult& return_val,
-      const TReportExecStatusParams& params) {
-    FAULT_INJECTION_RPC_DELAY(RPC_REPORTEXECSTATUS);
-    impala_server_->ReportExecStatus(return_val, params);
-  }
+  virtual void UpdateFilter(const kudu::rpc_test::UpdateFilterRequestPB* request,
+      kudu::rpc_test::UpdateFilterResponsePB* response, kudu::rpc::RpcContext* context);
 
-  virtual void TransmitData(TTransmitDataResult& return_val,
-      const TTransmitDataParams& params) {
-    FAULT_INJECTION_RPC_DELAY(RPC_TRANSMITDATA);
-    impala_server_->TransmitData(return_val, params);
-  }
+  virtual void ExecPlanFragment(const kudu::rpc_test::ExecPlanFragmentRequestPB* request,
+      kudu::rpc_test::ExecPlanFragmentResponsePB* response, kudu::rpc::RpcContext* context);
 
-  virtual void UpdateFilter(TUpdateFilterResult& return_val,
-      const TUpdateFilterParams& params) {
-    FAULT_INJECTION_RPC_DELAY(RPC_UPDATEFILTER);
-    impala_server_->UpdateFilter(return_val, params);
-  }
+  virtual void ReportExecStatus(const kudu::rpc_test::ReportExecStatusRequestPB* request,
+      kudu::rpc_test::ReportExecStatusResponsePB* response, kudu::rpc::RpcContext* context);
 
-  virtual void PublishFilter(TPublishFilterResult& return_val,
-      const TPublishFilterParams& params) {
-    FAULT_INJECTION_RPC_DELAY(RPC_PUBLISHFILTER);
-    fragment_mgr_->PublishFilter(return_val, params);
-  }
-
- private:
-  /// Manages fragment reporting and data transmission
-  ImpalaServer* impala_server_;
-
-  /// Manages fragment execution
-  FragmentMgr* fragment_mgr_;
+  virtual void CancelPlanFragment(const kudu::rpc_test::CancelPlanFragmentRequestPB* request,
+      kudu::rpc_test::CancelPlanFragmentResponsePB* response, kudu::rpc::RpcContext* context);
 };
+
 
 }
 

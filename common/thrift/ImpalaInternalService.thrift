@@ -594,50 +594,6 @@ struct TPoolConfig {
   5: required string default_query_options;
 }
 
-struct TBloomFilter {
-  // Log_2 of the heap space required for this filter. See BloomFilter::BloomFilter() for
-  // details.
-  1: required i32 log_heap_space
-
-  // List of buckets representing the Bloom Filter contents, laid out contiguously in one
-  // string for efficiency of (de)serialisation. See BloomFilter::Bucket and
-  // BloomFilter::directory_.
-  2: binary directory
-
-  // If true, this filter allows all elements to pass (i.e. its selectivity is 1). If
-  // true, 'directory' and 'log_heap_space' are not meaningful.
-  4: required bool always_true
-}
-
-struct TUpdateFilterResult {
-
-}
-
-struct TUpdateFilterParams {
-  // Filter ID, unique within a query.
-  1: required i32 filter_id
-
-  // Query that this filter is for.
-  2: required Types.TUniqueId query_id
-
-  3: required TBloomFilter bloom_filter
-}
-
-struct TPublishFilterResult {
-
-}
-
-struct TPublishFilterParams {
-  // Filter ID to update
-  1: required i32 filter_id
-
-  // ID of fragment to receive this filter
-  2: required Types.TUniqueId dst_instance_id
-
-  // Actual bloom_filter payload
-  3: required TBloomFilter bloom_filter
-}
-
 service ImpalaInternalService {
   // Called by coord to start asynchronous execution of plan fragment in backend.
   // Returns as soon as all incoming data streams have been set up.
@@ -655,12 +611,4 @@ service ImpalaInternalService {
   // Called by sender to transmit single row batch. Returns error indication
   // if params.fragmentId or params.destNodeId are unknown or if data couldn't be read.
   TTransmitDataResult TransmitData(1:TTransmitDataParams params);
-
-  // Called by fragment instances that produce local runtime filters to deliver them to
-  // the coordinator for aggregation and broadcast.
-  TUpdateFilterResult UpdateFilter(1:TUpdateFilterParams params);
-
-  // Called by the coordinator to deliver global runtime filters to fragment instances for
-  // application at plan nodes.
-  TPublishFilterResult PublishFilter(1:TPublishFilterParams params);
 }

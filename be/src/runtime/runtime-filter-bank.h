@@ -26,13 +26,18 @@
 #include <boost/thread/lock_guard.hpp>
 #include <boost/unordered_map.hpp>
 
+namespace kudu {
+namespace rpc_test {
+class BloomFilterPB;
+}
+}
+
 namespace impala {
 
 class BloomFilter;
 class MemTracker;
 class RuntimeFilter;
 class RuntimeState;
-class TBloomFilter;
 class TRuntimeFilterDesc;
 class TQueryCtx;
 
@@ -76,7 +81,7 @@ class RuntimeFilterBank {
 
   /// Makes a bloom_filter (aggregated globally from all producer fragments) available for
   /// consumption by operators that wish to use it for filtering.
-  void PublishGlobalFilter(int32_t filter_id, const TBloomFilter& thrift_filter);
+  void PublishGlobalFilter(int32_t filter_id, const kudu::rpc_test::BloomFilterPB& filter_pb);
 
   /// Returns true if, according to the observed NDV in 'observed_ndv', a filter of size
   /// 'filter_size' would have an expected false-positive rate which would exceed

@@ -23,6 +23,7 @@ set(EXECUTABLE_OUTPUT_PATH "${BUILD_OUTPUT_ROOT_DIRECTORY}/rpc")
 
 add_library(Rpc
   authentication.cc
+  rpc-mgr.cc
   rpc-trace.cc
   TAcceptQueueServer.cpp
   thrift-util.cc

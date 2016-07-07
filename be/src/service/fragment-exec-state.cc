@@ -26,12 +26,24 @@
 #include "runtime/runtime-filter-bank.h"
 #include "util/bloom-filter.h"
 #include "runtime/backend-client.h"
+#include "service/prototest.pb.h"
+#include "rpc/rpc-mgr.h"
+
+#include "kudu/util/net/net_util.h"
+#include "service/prototest.proxy.h"
 
 #include "common/names.h"
 
 using namespace apache::thrift;
 using namespace strings;
 using namespace impala;
+using kudu::rpc_test::BloomFilterPB;
+using kudu::HostPort;
+using kudu::rpc::RpcController;
+using kudu::rpc_test::ImpalaKRPCServiceProxy;
+
+using kudu::rpc_test::ReportExecStatusRequestPB;
+using kudu::rpc_test::ReportExecStatusResponsePB;
 
 Status FragmentMgr::FragmentExecState::UpdateStatus(const Status& status) {
   lock_guard<mutex> l(status_lock_);
@@ -115,28 +127,28 @@ void FragmentMgr::FragmentExecState::ReportStatusCb(
   }
   params.__isset.error_log = (params.error_log.size() > 0);
 
+  unique_ptr<ImpalaKRPCServiceProxy> proxy;
+  RETURN_VOID_IF_ERROR(
+      ExecEnv::GetInstance()->rpc_mgr()->GetProxy(coord_address(), &proxy));
+
+  ReportExecStatusRequestPB request;
+  SerializeThriftToProtoWrapper(&params, true, &request);
+
+  RpcController controller;
+  ReportExecStatusResponsePB response;
+  proxy->ReportExecStatus(request, &response, &controller);
+
   TReportExecStatusResult res;
-  Status rpc_status;
-  bool retry_is_safe;
-  // Try to send the RPC 3 times before failing.
-  for (int i = 0; i < 3; ++i) {
-    rpc_status = coord.DoRpc(&ImpalaBackendClient::ReportExecStatus, params, &res,
-        &retry_is_safe);
-    if (rpc_status.ok()) {
-      rpc_status = Status(res.status);
-      break;
-    }
-    if (!retry_is_safe) break;
-    if (i < 2) SleepForMs(100);
-  }
-  if (!rpc_status.ok()) {
-    UpdateStatus(rpc_status);
-    executor_.Cancel();
-  }
+  DeserializeThriftFromProtoWrapper(response, true, &res);
+
+  // if (!rpc_status.ok()) {
+  //   UpdateStatus(rpc_status);
+  //   executor_.Cancel();
+  // }
 }
 
 void FragmentMgr::FragmentExecState::PublishFilter(int32_t filter_id,
-    const TBloomFilter& thrift_bloom_filter) {
+    const BloomFilterPB& bloom_filter_pb) {
   // Defensively protect against blocking forever in case there's some problem with
   // Prepare().
   static const int WAIT_MS = 30000;
@@ -149,5 +161,5 @@ void FragmentMgr::FragmentExecState::PublishFilter(int32_t filter_id,
   }
   if (!prepare_status.ok()) return;
   executor_.runtime_state()->filter_bank()->PublishGlobalFilter(filter_id,
-      thrift_bloom_filter);
+      bloom_filter_pb);
 }

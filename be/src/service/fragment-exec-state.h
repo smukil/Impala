@@ -26,6 +26,8 @@
 #include "runtime/plan-fragment-executor.h"
 #include "service/fragment-mgr.h"
 
+namespace kudu { namespace rpc_test { class BloomFilterPB; } }
+
 namespace impala {
 
 /// Execution state of a single plan fragment.
@@ -62,7 +64,7 @@ class FragmentMgr::FragmentExecState {
   void set_exec_thread(Thread* exec_thread) { exec_thread_.reset(exec_thread); }
 
   /// Publishes filter with ID 'filter_id' to this fragment's filter bank.
-  void PublishFilter(int32_t filter_id, const TBloomFilter& thrift_bloom_filter);
+  void PublishFilter(int32_t filter_id, const kudu::rpc_test::BloomFilterPB& bloom_filter_pb);
 
   PlanFragmentExecutor* executor() { return &executor_; }
 

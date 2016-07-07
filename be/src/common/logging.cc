@@ -49,7 +49,9 @@ DECLARE_string(redaction_rules_file);
 
 using boost::uuids::random_generator;
 
+namespace {
 bool logging_initialized = false;
+}
 
 mutex logging_mutex;
 

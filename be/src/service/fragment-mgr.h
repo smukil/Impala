@@ -25,6 +25,11 @@
 #include "common/status.h"
 #include "util/spinlock.h"
 
+namespace kudu { namespace rpc_test {
+class PublishFilterRequestPB;
+class PublishFilterResponsePB;
+}}
+
 namespace impala {
 
 /// Manages execution of individual plan fragment instances, which are typically run as a
@@ -64,8 +69,8 @@ class FragmentMgr {
       const TUniqueId& fragment_instance_id);
 
   /// Publishes a global runtime filter to a local fragment.
-  void PublishFilter(TPublishFilterResult& return_val,
-      const TPublishFilterParams& params);
+  void PublishFilter(const kudu::rpc_test::PublishFilterRequestPB* request,
+      kudu::rpc_test::PublishFilterResponsePB* response);
 
  private:
   /// protects fragment_exec_state_map_

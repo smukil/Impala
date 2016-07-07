@@ -26,11 +26,15 @@
 #include "runtime/mem-tracker.h"
 #include "util/impalad-metrics.h"
 #include "util/uid-util.h"
+#include "service/prototest.pb.h"
 
 #include "common/names.h"
 
 using namespace impala;
 using namespace strings;
+
+using kudu::rpc_test::PublishFilterRequestPB;
+using kudu::rpc_test::PublishFilterResponsePB;
 
 // TODO: this logging should go into a per query log.
 DEFINE_int32(log_mem_usage_interval, 0, "If non-zero, impalad will output memory usage "
@@ -140,15 +144,17 @@ void FragmentMgr::CancelPlanFragment(TCancelPlanFragmentResult& return_val,
   exec_state->Cancel().SetTStatus(&return_val);
 }
 
-void FragmentMgr::PublishFilter(TPublishFilterResult& return_val,
-    const TPublishFilterParams& params) {
-  VLOG_FILE << "PublishFilter(): dst_instance_id=" << params.dst_instance_id;
-  shared_ptr<FragmentExecState> fragment_exec_state =
-      GetFragmentExecState(params.dst_instance_id);
+void FragmentMgr::PublishFilter(const PublishFilterRequestPB* request,
+    PublishFilterResponsePB* response) {
+  // VLOG_FILE << "PublishFilter(): dst_instance_id=" << params.dst_instance_id;
+  TUniqueId instance_id;
+  instance_id.lo = request->dst_instance_id().lo();
+  instance_id.hi = request->dst_instance_id().hi();
+  shared_ptr<FragmentExecState> fragment_exec_state = GetFragmentExecState(instance_id);
   if (fragment_exec_state.get() == NULL) {
-    LOG(INFO) << "Unknown fragment (ID: " << params.dst_instance_id
-              << ") for filter (ID: " << params.filter_id << ")";
+    LOG(INFO) << "Unknown fragment (ID: " << instance_id
+              << ") for filter (ID: " << request->filter_id() << ")";
     return;
   }
-  fragment_exec_state->PublishFilter(params.filter_id, params.bloom_filter);
+  fragment_exec_state->PublishFilter(request->filter_id(), request->bloom_filter());
 }

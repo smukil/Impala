@@ -135,6 +135,21 @@ Status DeserializeThriftMsg(const uint8_t* buf, uint32_t* len, bool compact,
   return Status::OK();
 }
 
+template<class T, class P>
+Status DeserializeThriftFromProtoWrapper(const P& proto, bool compact,
+    T* deserialized_msg) {
+  uint32_t len = proto.thrift_struct().size();
+  return DeserializeThriftMsg(
+      reinterpret_cast<const uint8_t*>(proto.thrift_struct().data()), &len, compact,
+      deserialized_msg);
+}
+
+template<class T, class P>
+Status SerializeThriftToProtoWrapper(T* thrift, bool compact, P* proto) {
+  ThriftSerializer serializer(compact);
+  return serializer.Serialize(thrift, proto->mutable_thrift_struct());
+}
+
 /// Redirects all Thrift logging to VLOG(1)
 void InitThriftLogging();
 

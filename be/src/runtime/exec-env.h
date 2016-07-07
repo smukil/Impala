@@ -41,6 +41,7 @@ class MemTracker;
 class MetricGroup;
 class QueryResourceMgr;
 class RequestPoolService;
+class RpcMgr;
 class Scheduler;
 class StatestoreSubscriber;
 class TestExecEnv;
@@ -97,6 +98,7 @@ class ExecEnv {
   RequestPoolService* request_pool_service() { return request_pool_service_.get(); }
   CallableThreadPool* rpc_pool() { return async_rpc_pool_.get(); }
   FragmentMgr* fragment_mgr() { return fragment_mgr_.get(); }
+  RpcMgr* rpc_mgr() { return rpc_mgr_.get(); }
 
   void set_enable_webserver(bool enable) { enable_webserver_ = enable; }
 
@@ -139,6 +141,7 @@ class ExecEnv {
   boost::scoped_ptr<CallableThreadPool> fragment_exec_thread_pool_;
   boost::scoped_ptr<CallableThreadPool> async_rpc_pool_;
   boost::scoped_ptr<FragmentMgr> fragment_mgr_;
+  boost::scoped_ptr<RpcMgr> rpc_mgr_;
 
   /// Not owned by this class
   ImpalaServer* impala_server_;

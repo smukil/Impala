@@ -27,6 +27,7 @@ add_library(Service
   fragment-exec-state.cc
   fragment-mgr.cc
   hs2-util.cc
+  impala-internal-service.cc
   impala-server.cc
   impala-http-handler.cc
   impala-hs2-server.cc
@@ -73,3 +74,8 @@ target_link_libraries(impalad
 ADD_BE_TEST(session-expiry-test session-expiry-test.cc)
 ADD_BE_TEST(hs2-util-test hs2-util-test.cc)
 ADD_BE_TEST(query-options-test query-options-test.cc)
+
+KRPC_GENERATE(PING_PROTO_SRCS PING_PROTO_HDRS PING_PROTO_TGTS
+  SOURCE_ROOT ${CMAKE_CURRENT_SOURCE_DIR}
+  PROTO_FILES prototest.proto)
+add_library(prototest ${PING_PROTO_SRCS} ${PING_PROTO_HDRS})

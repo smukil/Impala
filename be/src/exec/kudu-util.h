@@ -21,9 +21,13 @@
 #include <kudu/client/callbacks.h>
 #include <kudu/client/client.h>
 
-namespace impala {
+#include "util/network-util.h"
+#include "kudu/util/net/net_util.h"
+#include "common/status.h"
 
-class Status;
+#include "gutil/strings/substitute.h"
+
+namespace impala {
 
 /// Returns false when running on an operating system that Kudu doesn't support. If this
 /// check fails, there is no way Kudu should be expected to work. Exposed for testing.
@@ -54,6 +58,16 @@ void InitKuduLogging();
 // This method is not supposed to be used directly.
 void LogKuduMessage(kudu::client::KuduLogSeverity severity, const char* filename,
     int line_number, const struct ::tm* time, const char* message, size_t message_len);
+
+inline Status FromKuduStatus(const kudu::Status& k_status, const std::string prepend = "") {
+  if (LIKELY(k_status.ok())) return Status::OK();
+  if (prepend.empty()) return Status(k_status.ToString());
+  return Status(strings::Substitute("$0: $1", prepend, k_status.ToString()));
+}
+
+inline kudu::HostPort ToHostPort(const TNetworkAddress& address) {
+  return kudu::HostPort(address.hostname, address.port);
+}
 
 /// Takes a Kudu status and returns an impala one, if it's not OK.
 #define KUDU_RETURN_IF_ERROR(expr, prepend) \

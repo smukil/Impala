@@ -23,7 +23,11 @@
 
 #include "testutil/gtest-util.h"
 
+#include "service/prototest.pb.h"
+
 using namespace std;
+
+using kudu::rpc_test::BloomFilterPB;
 
 namespace {
 
@@ -63,19 +67,19 @@ bool BfFind(BloomFilter& bf, uint32_t h) {
 // Computes union of 'x' and 'y'. Computes twice with AVX enabled and disabled and
 // verifies both produce the same result. 'success' is set to true if both union
 // computations returned the same result and set to false otherwise.
-TBloomFilter BfUnion(const BloomFilter& x, const BloomFilter& y, bool* success) {
-  TBloomFilter thrift_x, thrift_y;
-  BloomFilter::ToThrift(&x, &thrift_x);
-  BloomFilter::ToThrift(&y, &thrift_y);
+BloomFilterPB BfUnion(const BloomFilter& x, const BloomFilter& y, bool* success) {
+  BloomFilterPB thrift_x, thrift_y;
+  BloomFilter::ToProto(&x, &thrift_x);
+  BloomFilter::ToProto(&y, &thrift_y);
   BloomFilter::Or(thrift_x, &thrift_y);
   {
     CpuInfo::TempDisable t1(CpuInfo::AVX);
     CpuInfo::TempDisable t2(CpuInfo::AVX2);
-    TBloomFilter thrift_x2, thrift_y2;
-    BloomFilter::ToThrift(&x, &thrift_x2);
-    BloomFilter::ToThrift(&y, &thrift_y2);
+    BloomFilterPB thrift_x2, thrift_y2;
+    BloomFilter::ToProto(&x, &thrift_x2);
+    BloomFilter::ToProto(&y, &thrift_y2);
     BloomFilter::Or(thrift_x2, &thrift_y2);
-    *success = thrift_y.directory == thrift_y2.directory;
+    *success = thrift_y.directory() == thrift_y2.directory();
   }
   return thrift_y;
 }
@@ -254,16 +258,16 @@ TEST(BloomFilter, Thrift) {
     if (!BfFind(bf, i)) missing_ints.insert(i);
   }
 
-  TBloomFilter to_thrift;
-  BloomFilter::ToThrift(&bf, &to_thrift);
-  EXPECT_EQ(to_thrift.always_true, false);
+  BloomFilterPB to_thrift;
+  BloomFilter::ToProto(&bf, &to_thrift);
+  EXPECT_EQ(to_thrift.always_true(), false);
 
   BloomFilter from_thrift(to_thrift);
   for (int i = 0; i < 10; ++i) ASSERT_TRUE(BfFind(from_thrift, i));
   for (int missing: missing_ints) ASSERT_FALSE(BfFind(from_thrift, missing));
 
-  BloomFilter::ToThrift(NULL, &to_thrift);
-  EXPECT_EQ(to_thrift.always_true, true);
+  BloomFilter::ToProto(NULL, &to_thrift);
+  EXPECT_EQ(to_thrift.always_true(), true);
 }
 
 TEST(BloomFilter, ThriftOr) {
@@ -282,7 +286,7 @@ TEST(BloomFilter, ThriftOr) {
   // Insert another value to aggregated BloomFilter.
   for (int i = 11; i < 50; ++i) BfInsert(bf3, i);
 
-  // Apply TBloomFilter back to BloomFilter and verify if aggregation was correct.
+  // Apply BloomFilterPB back to BloomFilter and verify if aggregation was correct.
   BloomFilter bf4(BfUnion(bf1, bf3, &success));
   ASSERT_TRUE(success) << "SIMD BloomFilter::Union error";
   for (int i = 11; i < 50; ++i) ASSERT_TRUE(BfFind(bf4, i)) << i;

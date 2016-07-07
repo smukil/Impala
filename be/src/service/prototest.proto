@@ -1,0 +1,145 @@
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+//
+// Test protocol for kudu RPC.
+package kudu.rpc_test;
+
+// import "kudu/rpc/rpc_header.proto";
+
+message UniqueIdPB {
+  required int64 hi = 1;
+  required int64 lo = 2;
+}
+
+message RowBatchPB {
+  required int32 num_rows = 1;
+  repeated int32 row_tuples = 2;
+  repeated int32 tuple_offsets = 3;
+  required bytes tuple_data = 4;
+  required int32 uncompressed_size = 5;
+  required int32 compression_type = 6;
+}
+
+message TransmitDataRequestPB {
+  required UniqueIdPB dest_fragment_instance_id = 1;
+  required int32 sender_id = 2;
+  required int32 dest_node_id = 3;
+  required RowBatchPB row_batch = 4;
+  required bool eos = 5;
+}
+
+message TransmitDataResponsePB {
+
+}
+
+message BloomFilterPB {
+  // Log_2 of the heap space required for this filter. See BloomFilter::BloomFilter() for
+  // details.
+  required int32 log_heap_space = 1;
+
+  // List of buckets representing the Bloom Filter contents, laid out contiguously in one
+  // string for efficiency of (de)serialisation. See BloomFilter::Bucket and
+  // BloomFilter::directory_.
+  required bytes directory = 2;
+
+  // If true, this filter allows all elements to pass (i.e. its selectivity is 1). If
+  // true, 'directory' and 'log_heap_space' are not meaningful.
+  required bool always_true = 3;
+}
+
+message PublishFilterRequestPB {
+  // Filter ID, unique within a query.
+  required int32 filter_id = 1;
+
+  // ID of fragment to receive this filter
+  required UniqueIdPB dst_instance_id = 2;
+
+// Actual bloom_filter payload
+  required BloomFilterPB bloom_filter = 3;
+}
+
+message PublishFilterResponsePB {
+
+}
+
+message UpdateFilterRequestPB {
+  // Filter ID, unique within a query.
+  required int32 filter_id = 1;
+
+  // Query that this filter is for.
+  required UniqueIdPB query_id = 2;
+  required BloomFilterPB bloom_filter = 3;
+}
+
+message UpdateFilterResponsePB {
+
+}
+
+////
+
+message ExecPlanFragmentRequestPB {
+  required bytes thrift_struct = 1;
+}
+
+message ExecPlanFragmentResponsePB {
+  required bytes thrift_struct = 1;
+}
+
+message ReportExecStatusRequestPB {
+  required bytes thrift_struct = 1;
+}
+
+message ReportExecStatusResponsePB {
+  required bytes thrift_struct = 1;
+}
+
+message CancelPlanFragmentRequestPB {
+  required bytes thrift_struct = 1;
+}
+
+message CancelPlanFragmentResponsePB {
+  required bytes thrift_struct = 1;
+}
+
+////
+
+service ImpalaKRPCService {
+  // Called by sender to transmit single row batch. Returns error indication
+  // if params.fragmentId or params.destNodeId are unknown or if data couldn't be read.
+  rpc TransmitData(TransmitDataRequestPB) returns (TransmitDataResponsePB);
+
+  // Called by the coordinator to deliver global runtime filters to fragment instances for
+  // application at plan nodes.
+  rpc PublishFilter(PublishFilterRequestPB) returns (PublishFilterResponsePB);
+
+  // Called by fragment instances that produce local runtime filters to deliver them to
+  // the coordinator for aggregation and broadcast.
+  rpc UpdateFilter(UpdateFilterRequestPB) returns (UpdateFilterResponsePB);
+
+  // Called by coord to start asynchronous execution of plan fragment in backend.
+  // Returns as soon as all incoming data streams have been set up.
+  rpc ExecPlanFragment(ExecPlanFragmentRequestPB) returns (ExecPlanFragmentResponsePB);
+
+  // Periodically called by backend to report status of plan fragment execution
+  // back to coord; also called when execution is finished, for whatever reason.
+  rpc ReportExecStatus(ReportExecStatusRequestPB) returns (ReportExecStatusResponsePB);
+
+  // Called by coord to cancel execution of a single plan fragment, which this
+  // coordinator initiated with a prior call to ExecPlanFragment.
+  // Cancellation is asynchronous.
+  rpc CancelPlanFragment(CancelPlanFragmentRequestPB) returns (CancelPlanFragmentResponsePB);
+}

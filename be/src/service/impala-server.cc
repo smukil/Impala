@@ -73,6 +73,8 @@
 #include "util/summary-util.h"
 #include "util/uid-util.h"
 
+#include "rpc/rpc-mgr.h"
+
 #include "gen-cpp/Types_types.h"
 #include "gen-cpp/ImpalaService.h"
 #include "gen-cpp/DataSinks_types.h"
@@ -96,6 +98,8 @@ using namespace apache::thrift;
 using namespace boost::posix_time;
 using namespace beeswax;
 using namespace strings;
+using kudu::rpc_test::UpdateFilterRequestPB;
+using kudu::rpc_test::UpdateFilterResponsePB;
 
 DECLARE_int32(be_port);
 DECLARE_string(nn);
@@ -1103,6 +1107,7 @@ void ImpalaServer::TransmitData(
   // TODO: fix Thrift so we can simply take ownership of thrift_batch instead
   // of having to copy its data
   if (params.row_batch.num_rows > 0) {
+    // LOG(INFO) << "HNR: THRIFT -> " << PrintThrift(params.row_batch);
     Status status = exec_env_->stream_mgr()->AddData(
         params.dest_fragment_instance_id, params.dest_node_id, params.row_batch,
         params.sender_id);
@@ -1870,24 +1875,6 @@ Status CreateImpalaServer(ExecEnv* exec_env, int beeswax_port, int hs2_port, int
     LOG(INFO) << "Impala HiveServer2 Service listening on " << hs2_port;
   }
 
-  if (be_port != 0 && be_server != NULL) {
-    boost::shared_ptr<ImpalaInternalService> thrift_if(new ImpalaInternalService());
-    boost::shared_ptr<TProcessor> be_processor(
-        new ImpalaInternalServiceProcessor(thrift_if));
-    boost::shared_ptr<TProcessorEventHandler> event_handler(
-        new RpcEventHandler("backend", exec_env->metrics()));
-    be_processor->setEventHandler(event_handler);
-
-    *be_server = new ThriftServer("backend", be_processor, be_port, NULL,
-        exec_env->metrics(), FLAGS_be_service_threads);
-    if (EnableInternalSslConnections()) {
-      LOG(INFO) << "Enabling SSL for backend";
-      RETURN_IF_ERROR((*be_server)->EnableSsl(FLAGS_ssl_server_certificate,
-          FLAGS_ssl_private_key, FLAGS_ssl_private_key_password_cmd));
-    }
-
-    LOG(INFO) << "ImpalaInternalService listening on " << be_port;
-  }
   if (impala_server != NULL) *impala_server = handler.get();
 
   return Status::OK();
@@ -1918,11 +1905,14 @@ shared_ptr<ImpalaServer::QueryExecState> ImpalaServer::GetQueryExecState(
   }
 }
 
-void ImpalaServer::UpdateFilter(TUpdateFilterResult& result,
-    const TUpdateFilterParams& params) {
-  shared_ptr<QueryExecState> query_exec_state = GetQueryExecState(params.query_id, false);
+void ImpalaServer::UpdateFilter(const UpdateFilterRequestPB* params,
+    UpdateFilterResponsePB* response) {
+  TUniqueId query_id;
+  query_id.lo = params->query_id().lo();
+  query_id.hi = params->query_id().hi();
+  shared_ptr<QueryExecState> query_exec_state = GetQueryExecState(query_id, false);
   if (query_exec_state.get() == NULL) {
-    LOG(INFO) << "Could not find query exec state: " << params.query_id;
+    LOG(INFO) << "Could not find query exec state: " << query_id;
     return;
   }
   query_exec_state->coord()->UpdateFilter(params);

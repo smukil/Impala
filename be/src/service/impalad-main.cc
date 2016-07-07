@@ -38,11 +38,15 @@
 #include "rpc/thrift-server.h"
 #include "rpc/rpc-trace.h"
 #include "service/impala-server.h"
+#include "service/impala-internal-service.h"
 #include "service/fe-support.h"
+#include "rpc/rpc-mgr.h"
 #include "gen-cpp/ImpalaService.h"
 #include "gen-cpp/ImpalaInternalService.h"
 #include "util/impalad-metrics.h"
 #include "util/thread.h"
+
+#include <memory>
 
 #include "common/names.h"
 
@@ -86,11 +90,17 @@ int ImpaladMain(int argc, char** argv) {
   ABORT_IF_ERROR(CreateImpalaServer(&exec_env, FLAGS_beeswax_port, FLAGS_hs2_port,
       FLAGS_be_port, &beeswax_server, &hs2_server, &be_server, &server));
 
-  ABORT_IF_ERROR(be_server->Start());
-
   ABORT_IF_ERROR(beeswax_server->Start());
   ABORT_IF_ERROR(hs2_server->Start());
   Status status = exec_env.StartServices();
+  ABORT_IF_ERROR(exec_env.rpc_mgr()->RegisterService<ImpalaKRPCServiceImpl>());
+  // TODO(KRPC): Enable SSL
+  // if (EnableInternalSslConnections()) {
+  //   LOG(INFO) << "Enabling SSL for backend";
+  //   RETURN_IF_ERROR((*be_server)->EnableSsl(FLAGS_ssl_server_certificate,
+  //           FLAGS_ssl_private_key, FLAGS_ssl_private_key_password_cmd));
+  // }
+
   if (!status.ok()) {
     LOG(ERROR) << "Impalad services did not start correctly, exiting.  Error: "
                << status.GetDetail();

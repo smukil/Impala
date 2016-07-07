@@ -46,6 +46,8 @@
 #include "util/progress-updater.h"
 #include "util/runtime-profile.h"
 
+namespace kudu { namespace rpc_test { class UpdateFilterRequestPB; } }
+
 namespace impala {
 
 class CountingBarrier;
@@ -206,7 +208,7 @@ class Coordinator { // NOLINT: The member variables could be re-ordered to save 
   /// with others for the same filter ID into a global filter. If all updates for that
   /// filter ID have been received (may be 1 or more per filter), broadcast the global
   /// filter to fragment instances.
-  void UpdateFilter(const TUpdateFilterParams& params);
+  void UpdateFilter(const kudu::rpc_test::UpdateFilterRequestPB* request);
 
   /// Called once the query is complete to tear down any remaining state.
   void TearDown();

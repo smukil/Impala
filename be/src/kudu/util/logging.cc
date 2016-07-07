@@ -31,9 +31,10 @@
 #include "kudu/util/debug-util.h"
 #include "kudu/util/flag_tags.h"
 
-DEFINE_string(log_filename, "",
-    "Prefix of log filename - "
-    "full path is <log_dir>/<log_filename>.[INFO|WARN|ERROR|FATAL]");
+// TODO: HNR -> sort this out.
+DECLARE_string(log_filename);// , "",
+    // "Prefix of log filename - "
+    // "full path is <log_dir>/<log_filename>.[INFO|WARN|ERROR|FATAL]");
 TAG_FLAG(log_filename, stable);
 
 #define PROJ_NAME "kudu"

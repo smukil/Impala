@@ -45,6 +45,7 @@
 #include "runtime/runtime-state.h"
 #include "runtime/timestamp-value.h"
 #include "runtime/types.h"
+#include "service/prototest.pb.h"
 
 namespace impala {
 
@@ -234,8 +235,9 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
       const TReportExecStatusParams& params);
   void TransmitData(TTransmitDataResult& return_val,
       const TTransmitDataParams& params);
-  void UpdateFilter(TUpdateFilterResult& return_val,
-      const TUpdateFilterParams& params);
+
+  void UpdateFilter(const kudu::rpc_test::UpdateFilterRequestPB* request,
+      kudu::rpc_test::UpdateFilterResponsePB* response);
 
   /// Generates a unique id for this query and sets it in the given query context.
   /// Prepares the given query context by populating fields required for evaluating
