@@ -6,31 +6,28 @@
 
 #include <string.h>
 #include <algorithm>
+#include <climits>
+#include <string>
+#include <glog/logging.h>
+
+#include "gutil/hash/hash.h"
+#include "gutil/logging-inl.h"
+#include "gutil/stl_util.h"
+#include "gutil/strings/memutil.h"
+
 using std::copy;
 using std::max;
 using std::min;
 using std::reverse;
 using std::sort;
 using std::swap;
-#include <climits>
-#include <string>
 using std::string;
 
-#include <glog/logging.h>
-#include "gutil/logging-inl.h"
-#include "gutil/strings/memutil.h"
-#include "gutil/stl_util.h"
-#include "gutil/hash/hash.h"
-
-#include <ext/hash_set>
-namespace __gnu_cxx {
-
+namespace std {
 size_t hash<StringPiece>::operator()(StringPiece s) const {
   return HashTo32(s.data(), s.size());
 }
-
-}  // namespace __gnu_cxx
-
+} // namespace std
 
 std::ostream& operator<<(std::ostream& o, StringPiece piece) {
   o.write(piece.data(), piece.size());
@@ -84,7 +81,7 @@ int StringPiece::find(char c, size_type pos) const {
   }
   const char* result = static_cast<const char*>(
       memchr(ptr_ + pos, c, length_ - pos));
-  return result != NULL ? result - ptr_ : npos;
+  return result != nullptr ? result - ptr_ : npos;
 }
 
 int StringPiece::rfind(StringPiece s, size_type pos) const {

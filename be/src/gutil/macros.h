@@ -39,10 +39,8 @@ template <bool>
 struct CompileAssert {
 };
 
-#ifndef COMPILE_ASSERT
 #define COMPILE_ASSERT(expr, msg) \
-  typedef CompileAssert<(bool(expr))> msg[bool(expr) ? 1 : -1]
-#endif
+  typedef CompileAssert<(bool(expr))> msg[bool(expr) ? 1 : -1] ATTRIBUTE_UNUSED
 
 // Implementation details of COMPILE_ASSERT:
 //
@@ -204,6 +202,14 @@ char (&ArraySizeHelper(const T (&array)[N]))[N];
 // A macro to turn a symbol into a string
 #define AS_STRING(x)   AS_STRING_INTERNAL(x)
 #define AS_STRING_INTERNAL(x)   #x
+
+// Macro that allows definition of a variable appended with the current line
+// number in the source file. Typically for use by other macros to allow the
+// user to declare multiple variables with the same "base" name inside the same
+// lexical block.
+#define VARNAME_LINENUM(varname) VARNAME_LINENUM_INTERNAL(varname##_L, __LINE__)
+#define VARNAME_LINENUM_INTERNAL(v, line) VARNAME_LINENUM_INTERNAL2(v, line)
+#define VARNAME_LINENUM_INTERNAL2(v, line) v##line
 
 // The following enum should be used only as a constructor argument to indicate
 // that the variable has static storage class, and that the constructor should

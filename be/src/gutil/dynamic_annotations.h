@@ -240,40 +240,44 @@
     }while(0)\
 
   /* Stop ignoring all memory accesses. */
-  #define ANNOTATE_IGNORE_READS_AND_WRITES_END() \
-    do {\
-      ANNOTATE_IGNORE_WRITES_END();\
-      ANNOTATE_IGNORE_READS_END();\
-    }while(0)\
+#define ANNOTATE_IGNORE_READS_AND_WRITES_END() \
+  do {                                         \
+    ANNOTATE_IGNORE_WRITES_END();              \
+    ANNOTATE_IGNORE_READS_END();               \
+  } while (0)
 
-  /* Enable (enable!=0) or disable (enable==0) race detection for all threads.
-     This annotation could be useful if you want to skip expensive race analysis
-     during some period of program execution, e.g. during initialization. */
-  #define ANNOTATE_ENABLE_RACE_DETECTION(enable) \
-    AnnotateEnableRaceDetection(__FILE__, __LINE__, enable)
+/* Start ignoring all synchronization until ANNOTATE_IGNORE_SYNC_END
+   is called. */
+#define ANNOTATE_IGNORE_SYNC_BEGIN() AnnotateIgnoreSyncBegin(__FILE__, __LINE__)
 
-  /* -------------------------------------------------------------
-     Annotations useful for debugging. */
+/* Stop ignoring all synchronization. */
+#define ANNOTATE_IGNORE_SYNC_END() AnnotateIgnoreSyncEnd(__FILE__, __LINE__)
 
-  /* Request to trace every access to "address". */
-  #define ANNOTATE_TRACE_MEMORY(address) \
-    AnnotateTraceMemory(__FILE__, __LINE__, address)
+/* Enable (enable!=0) or disable (enable==0) race detection for all threads.
+   This annotation could be useful if you want to skip expensive race analysis
+   during some period of program execution, e.g. during initialization. */
+#define ANNOTATE_ENABLE_RACE_DETECTION(enable) \
+  AnnotateEnableRaceDetection(__FILE__, __LINE__, enable)
 
-  /* Report the current thread name to a race detector. */
-  #define ANNOTATE_THREAD_NAME(name) \
-    AnnotateThreadName(__FILE__, __LINE__, name)
+/* -------------------------------------------------------------
+   Annotations useful for debugging. */
 
-  /* -------------------------------------------------------------
-     Annotations useful when implementing locks.  They are not
-     normally needed by modules that merely use locks.
-     The "lock" argument is a pointer to the lock object. */
+/* Request to trace every access to "address". */
+#define ANNOTATE_TRACE_MEMORY(address) AnnotateTraceMemory(__FILE__, __LINE__, address)
 
-  /* Report that a lock has been created at address "lock". */
-  #define ANNOTATE_RWLOCK_CREATE(lock) \
-    AnnotateRWLockCreate(__FILE__, __LINE__, lock)
+/* Report the current thread name to a race detector. */
+#define ANNOTATE_THREAD_NAME(name) AnnotateThreadName(__FILE__, __LINE__, name)
 
-  /* Report that a linker initialized lock has been created at address "lock".
-   */
+/* -------------------------------------------------------------
+   Annotations useful when implementing locks.  They are not
+   normally needed by modules that merely use locks.
+   The "lock" argument is a pointer to the lock object. */
+
+/* Report that a lock has been created at address "lock". */
+#define ANNOTATE_RWLOCK_CREATE(lock) AnnotateRWLockCreate(__FILE__, __LINE__, lock)
+
+/* Report that a linker initialized lock has been created at address "lock".
+ */
 #ifdef THREAD_SANITIZER
   #define ANNOTATE_RWLOCK_CREATE_STATIC(lock) \
     AnnotateRWLockCreateStatic(__FILE__, __LINE__, lock)
@@ -374,9 +378,11 @@
   #define ANNOTATE_IGNORE_WRITES_END() /* empty */
   #define ANNOTATE_IGNORE_READS_AND_WRITES_BEGIN() /* empty */
   #define ANNOTATE_IGNORE_READS_AND_WRITES_END() /* empty */
-  #define ANNOTATE_ENABLE_RACE_DETECTION(enable) /* empty */
-  #define ANNOTATE_NO_OP(arg) /* empty */
-  #define ANNOTATE_FLUSH_STATE() /* empty */
+#define ANNOTATE_IGNORE_SYNC_BEGIN() /* empty */
+#define ANNOTATE_IGNORE_SYNC_END() /* empty */
+#define ANNOTATE_ENABLE_RACE_DETECTION(enable) /* empty */
+#define ANNOTATE_NO_OP(arg) /* empty */
+#define ANNOTATE_FLUSH_STATE() /* empty */
 
 #endif  /* DYNAMIC_ANNOTATIONS_ENABLED */
 
@@ -396,7 +402,7 @@
 
 #if defined(__GNUC__) && (!defined(SWIG)) && (!defined(__clang__))
 
-#if DYNAMIC_ANNOTATIONS_ENABLED == 0 && LLVM_ENABLE_THREADS == 0
+#if DYNAMIC_ANNOTATIONS_ENABLED == 0
 #define ANNOTALYSIS_ONLY 1
 #undef ANNOTALYSIS_STATIC_INLINE
 #define ANNOTALYSIS_STATIC_INLINE static inline
@@ -513,17 +519,16 @@ void AnnotateTraceMemory(const char *file, int line,
 void AnnotateThreadName(const char *file, int line,
                         const char *name);
 ANNOTALYSIS_STATIC_INLINE
-void AnnotateIgnoreReadsBegin(const char *file, int line)
-    ANNOTALYSIS_IGNORE_READS_BEGIN ANNOTALYSIS_SEMICOLON_OR_EMPTY_BODY
-ANNOTALYSIS_STATIC_INLINE
-void AnnotateIgnoreReadsEnd(const char *file, int line)
-    ANNOTALYSIS_IGNORE_READS_END ANNOTALYSIS_SEMICOLON_OR_EMPTY_BODY
-ANNOTALYSIS_STATIC_INLINE
-void AnnotateIgnoreWritesBegin(const char *file, int line)
-    ANNOTALYSIS_IGNORE_WRITES_BEGIN ANNOTALYSIS_SEMICOLON_OR_EMPTY_BODY
-ANNOTALYSIS_STATIC_INLINE
-void AnnotateIgnoreWritesEnd(const char *file, int line)
-    ANNOTALYSIS_IGNORE_WRITES_END ANNOTALYSIS_SEMICOLON_OR_EMPTY_BODY
+void AnnotateIgnoreReadsBegin(const char* file, int line) ANNOTALYSIS_IGNORE_READS_BEGIN
+    ANNOTALYSIS_SEMICOLON_OR_EMPTY_BODY ANNOTALYSIS_STATIC_INLINE
+    void AnnotateIgnoreReadsEnd(const char* file, int line) ANNOTALYSIS_IGNORE_READS_END
+    ANNOTALYSIS_SEMICOLON_OR_EMPTY_BODY ANNOTALYSIS_STATIC_INLINE
+    void AnnotateIgnoreWritesBegin(const char* file,
+        int line) ANNOTALYSIS_IGNORE_WRITES_BEGIN ANNOTALYSIS_SEMICOLON_OR_EMPTY_BODY
+    ANNOTALYSIS_STATIC_INLINE void AnnotateIgnoreWritesEnd(const char* file,
+        int line) ANNOTALYSIS_IGNORE_WRITES_END ANNOTALYSIS_SEMICOLON_OR_EMPTY_BODY
+    void AnnotateIgnoreSyncBegin(const char* file, int line);
+void AnnotateIgnoreSyncEnd(const char* file, int line);
 void AnnotateEnableRaceDetection(const char *file, int line, int enable);
 void AnnotateNoOp(const char *file, int line,
                   const volatile void *arg);
@@ -558,6 +563,46 @@ int RunningOnValgrind(void);
    }
  */
 double ValgrindSlowdown(void);
+
+/* AddressSanitizer annotations from LLVM asan_interface.h */
+
+#if defined(__SANITIZE_ADDRESS__) || defined(ADDRESS_SANITIZER)
+// Marks memory region [addr, addr+size) as unaddressable.
+// This memory must be previously allocated by the user program. Accessing
+// addresses in this region from instrumented code is forbidden until
+// this region is unpoisoned. This function is not guaranteed to poison
+// the whole region - it may poison only subregion of [addr, addr+size) due
+// to ASan alignment restrictions.
+// Method is NOT thread-safe in the sense that no two threads can
+// (un)poison memory in the same memory region simultaneously.
+void __asan_poison_memory_region(void const volatile* addr, size_t size);
+// Marks memory region [addr, addr+size) as addressable.
+// This memory must be previously allocated by the user program. Accessing
+// addresses in this region is allowed until this region is poisoned again.
+// This function may unpoison a superregion of [addr, addr+size) due to
+// ASan alignment restrictions.
+// Method is NOT thread-safe in the sense that no two threads can
+// (un)poison memory in the same memory region simultaneously.
+void __asan_unpoison_memory_region(void const volatile* addr, size_t size);
+
+// User code should use macros instead of functions.
+#define ASAN_POISON_MEMORY_REGION(addr, size) __asan_poison_memory_region((addr), (size))
+#define ASAN_UNPOISON_MEMORY_REGION(addr, size) \
+  __asan_unpoison_memory_region((addr), (size))
+#else
+#define ASAN_POISON_MEMORY_REGION(addr, size) ((void)(addr), (void)(size))
+#define ASAN_UNPOISON_MEMORY_REGION(addr, size) ((void)(addr), (void)(size))
+#endif
+
+// Sets the callback to be called right before death on error.
+// Passing 0 will unset the callback.
+void __asan_set_death_callback(void (*callback)(void));
+
+#if defined(__SANITIZE_ADDRESS__) || defined(ADDRESS_SANITIZER)
+#define ASAN_SET_DEATH_CALLBACK(cb) __asan_set_death_callback((cb))
+#else
+#define ASAN_SET_DEATH_CALLBACK(cb) ((void)(cb))
+#endif
 
 #ifdef __cplusplus
 }

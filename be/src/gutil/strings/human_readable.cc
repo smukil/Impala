@@ -122,7 +122,7 @@ string HumanReadableNumBytes::ToString(int64 num_bytes) {
   // Special case for bytes.
   if (num_bytes < GG_LONGLONG(1024)) {
     // No fractions for bytes.
-    return StringPrintf("%s%" GG_LL_FORMAT "dB", neg_str, num_bytes);
+    return StringPrintf("%s%" PRId64 "B", neg_str, num_bytes);
   }
 
   static const char units[] = "KMGTPE";  // int64 only goes up to E.
@@ -163,7 +163,7 @@ string HumanReadableNumBytes::ToStringWithoutRounding(int64 num_bytes) {
 
     num_units = next_units;
   }
-  return StringPrintf("%s%lld%c", neg_str, num_units, units[unit_type]);
+  return StringPrintf("%s%" PRId64 "%c", neg_str, num_units, units[unit_type]);
 }
 
 string HumanReadableInt::ToString(int64 value) {
@@ -173,7 +173,7 @@ string HumanReadableInt::ToString(int64 value) {
     value = -value;
   }
   if (value < GG_LONGLONG(1000)) {
-    StringAppendF(&s, "%" GG_LL_FORMAT "d", value);
+    StringAppendF(&s, "%" PRId64, value);
   } else if (value >= GG_LONGLONG(1000000000000000)) {
     // Number bigger than 1E15; use that notation.
     StringAppendF(&s, "%0.3G", static_cast<double>(value));
@@ -281,7 +281,11 @@ string HumanReadableElapsedTime::ToShortString(double seconds) {
     seconds = -seconds;
   }
 
-  // Start with us and keep going up to years.
+  // Start with ns and keep going up to years.
+  if (seconds < 0.000001) {
+    StringAppendF(&human_readable, "%0.3g ns", seconds * 1000000000.0);
+    return human_readable;
+  }
   if (seconds < 0.001) {
     StringAppendF(&human_readable, "%0.3g us", seconds * 1000000.0);
     return human_readable;
@@ -327,47 +331,28 @@ bool HumanReadableElapsedTime::ToDouble(const string& str, double* value) {
   // These must be sorted in decreasing length.  In particulary, a
   // string must exist before and of its substrings or the substring
   // will match;
-  static const TimeUnits kUnits[] = {
-    // Long forms
-    { "microsecond", 0.000001 },
-    { "millisecond", 0.001 },
-    { "second", 1.0 },
-    { "minute", 60.0 },
-    { "hour", 3600.0 },
-    { "day", 86400.0 },
-    { "week", 7 * 86400.0 },
-    { "month", 30 * 86400.0 },
-    { "year", 365 * 86400.0 },
+  static const TimeUnits kUnits[] = {// Long forms
+      {"nanosecond", 0.000000001}, {"microsecond", 0.000001}, {"millisecond", 0.001},
+      {"second", 1.0}, {"minute", 60.0}, {"hour", 3600.0}, {"day", 86400.0},
+      {"week", 7 * 86400.0}, {"month", 30 * 86400.0}, {"year", 365 * 86400.0},
 
-    // Abbreviated forms
-    { "microsec", 0.000001 },
-    { "millisec", 0.001 },
-    { "sec", 1.0 },
-    { "min", 60.0 },
-    { "hr", 3600.0 },
-    { "dy", 86400.0 },
-    { "wk", 7 * 86400.0 },
-    { "mon", 30 * 86400.0 },
-    { "yr", 365 * 86400.0 },
+      // Abbreviated forms
+      {"nanosec", 0.000000001}, {"microsec", 0.000001}, {"millisec", 0.001}, {"sec", 1.0},
+      {"min", 60.0}, {"hr", 3600.0}, {"dy", 86400.0}, {"wk", 7 * 86400.0},
+      {"mon", 30 * 86400.0}, {"yr", 365 * 86400.0},
 
-    // micro -> u
-    { "usecond", 0.000001 },
-    { "usec", 0.000001 },
-    // milli -> m
-    { "msecond", 0.001 },
-    { "msec", 0.001 },
+      // nano -> n
+      {"nsecond", 0.000000001}, {"nsec", 0.000000001},
+      // micro -> u
+      {"usecond", 0.000001}, {"usec", 0.000001},
+      // milli -> m
+      {"msecond", 0.001}, {"msec", 0.001},
 
-    // Ultra-short form
-    { "us", 0.000001 },
-    { "ms", 0.001 },
-    { "s", 1.0 },
-    { "m", 60.0 },
-    { "h", 3600.0 },
-    { "d", 86400.0 },
-    { "w", 7 * 86400.0 },
-    { "M", 30 * 86400.0 },  // upper-case M to disambiguate with minute
-    { "y", 365 * 86400.0 }
-  };
+      // Ultra-short form
+      {"ns", 0.000000001}, {"us", 0.000001}, {"ms", 0.001}, {"s", 1.0}, {"m", 60.0},
+      {"h", 3600.0}, {"d", 86400.0}, {"w", 7 * 86400.0},
+      {"M", 30 * 86400.0}, // upper-case M to disambiguate with minute
+      {"y", 365 * 86400.0}};
 
   char* unit_start;     // Start of unit name.
   double work_value = 0;

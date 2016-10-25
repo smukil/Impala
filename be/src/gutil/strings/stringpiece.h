@@ -112,19 +112,13 @@
 #ifndef STRINGS_STRINGPIECE_H_
 #define STRINGS_STRINGPIECE_H_
 
-
 #include <assert.h>
 #include <stddef.h>
 #include <string.h>
-#include <ext/hash_map>
-using __gnu_cxx::hash;
-using __gnu_cxx::hash_map;
+#include <functional>
 #include <iosfwd>
-using std::ostream;
 #include <limits>
-using std::numeric_limits;
 #include <string>
-using std::string;
 
 #include "gutil/integral_types.h"
 #include "gutil/port.h"
@@ -153,8 +147,9 @@ class StringPiece {
       length_ = static_cast<int>(length);
     }
   }
-  StringPiece(const string& str)  // NOLINT(runtime/explicit)
-      : ptr_(str.data()), length_(0) {
+  StringPiece(const std::string& str) // NOLINT(runtime/explicit)
+      : ptr_(str.data()),
+        length_(0) {
     size_t length = str.size();
     assert(length <= static_cast<size_t>(std::numeric_limits<int>::max()));
     length_ = static_cast<int>(length);
@@ -231,21 +226,19 @@ class StringPiece {
     return 0;
   }
 
-  string as_string() const {
-    return ToString();
-  }
+  std::string as_string() const { return ToString(); }
   // We also define ToString() here, since many other string-like
   // interfaces name the routine that converts to a C++ string
   // "ToString", and it's confusing to have the method that does that
   // for a StringPiece be called "as_string()".  We also leave the
   // "as_string()" method defined here for existing code.
-  string ToString() const {
-    if (ptr_ == NULL) return string();
-    return string(data(), size());
+  std::string ToString() const {
+    if (ptr_ == NULL) return std::string();
+    return std::string(data(), size());
   }
 
-  void CopyToString(string* target) const;
-  void AppendToString(string* target) const;
+  void CopyToString(std::string* target) const;
+  void AppendToString(std::string* target) const;
 
   bool starts_with(StringPiece x) const {
     return (length_ >= x.length_) && (memcmp(ptr_, x.ptr_, x.length_) == 0);
@@ -352,21 +345,12 @@ template <class X> struct GoodFastHash;
 
 // SWIG doesn't know how to parse this stuff properly. Omit it.
 #ifndef SWIG
-#include <ext/hash_set>
-namespace __gnu_cxx {
 
+namespace std {
 template<> struct hash<StringPiece> {
   size_t operator()(StringPiece s) const;
-  // Less than operator, for MSVC.
-  bool operator()(const StringPiece& s1, const StringPiece& s2) const {
-    return s1 < s2;
-  }
-  static const size_t bucket_size = 4;  // These are required by MSVC
-  static const size_t min_buckets = 8;  // 4 and 8 are defaults.
 };
-
-}  // namespace __gnu_cxx
-
+} // namespace std
 
 // An implementation of GoodFastHash for StringPiece.  See
 // GoodFastHash values.

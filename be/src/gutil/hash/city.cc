@@ -305,10 +305,8 @@ uint128 CityHash128(const char *s, size_t len) {
                                uint128(LittleEndian::Load64(s) ^ k3,
                                        LittleEndian::Load64(s + 8)));
   } else if (len >= 8) {
-    return CityHash128WithSeed(NULL,
-                               0,
-                               uint128(LittleEndian::Load64(s) ^ (len * k0),
-                                       LittleEndian::Load64(s + len - 8) ^ k1));
+    return CityHash128WithSeed(nullptr, 0, uint128(LittleEndian::Load64(s) ^ (len * k0),
+                                               LittleEndian::Load64(s + len - 8) ^ k1));
   } else {
     return CityHash128WithSeed(s, len, uint128(k0, k1));
   }

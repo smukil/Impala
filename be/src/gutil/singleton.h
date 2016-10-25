@@ -60,6 +60,7 @@
 #include <stddef.h>
 
 #include <glog/logging.h>
+
 #include "gutil/logging-inl.h"
 #include "gutil/once.h"
 
