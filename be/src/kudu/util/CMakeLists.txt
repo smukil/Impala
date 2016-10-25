@@ -15,10 +15,6 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# HNR TO FIX
-add_library(protobuf SHARED IMPORTED)
-#####
-
 #######################################
 # histogram_proto
 #######################################

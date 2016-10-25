@@ -81,6 +81,7 @@ set_dep_root(LLVM)
 set(LLVM_DEBUG_ROOT $ENV{IMPALA_TOOLCHAIN}/llvm-$ENV{IMPALA_LLVM_DEBUG_VERSION})
 set_dep_root(LZ4)
 set_dep_root(OPENLDAP)
+set_dep_root(PROTOBUF)
 set_dep_root(RE2)
 set_dep_root(RAPIDJSON)
 set_dep_root(SNAPPY)
@@ -299,7 +300,26 @@ if (NOT APPLE)
     SHARED_LIB "${DL_LIB_PATH}")
 endif()
 
+# find protobuf headers, libs and compiler
+find_package(Protobuf REQUIRED)
+include_directories(SYSTEM ${PROTOBUF_INCLUDE_DIR})
+message(STATUS "Protobuf library: " ${PROTOBUF_STATIC_LIBRARY})
+message(STATUS "Protobuf include dir: " ${PROTOBUF_INCLUDE_DIR})
+# TODO - how do we decide whether to use shared or static?
+ADD_THIRDPARTY_LIB(protobuf
+  STATIC_LIB "${PROTOBUF_STATIC_LIBRARY}"
+  SHARED_LIB "${PROTOBUF_SHARED_LIBRARY}")
+ADD_THIRDPARTY_LIB(protoc
+  STATIC_LIB "${PROTOBUF_PROTOC_STATIC_LIBRARY}"
+  SHARED_LIB "${PROTOBUF_PROTOC_LIBRARY}"
+  DEPS protobuf)
+
+find_package(LibEv REQUIRED)
+
 ###################################################################
+
+# Required for KRPC_GENERATE, which converts protobuf to stubs.
+find_package(KRPC REQUIRED)
 
 # KuduClient can use GLOG
 add_definitions(-DKUDU_HEADERS_USE_GLOG)
