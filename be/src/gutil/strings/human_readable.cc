@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <glog/logging.h>
+#include <common/logging.h>
 #include "gutil/logging-inl.h"
 #include "gutil/stringprintf.h"
 #include "gutil/strings/strip.h"

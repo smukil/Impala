@@ -4,7 +4,7 @@
 
 #include "gutil/threading/thread_collision_warner.h"
 
-#include <glog/logging.h>
+#include <common/logging.h>
 
 #include "gutil/linux_syscall_support.h"
 

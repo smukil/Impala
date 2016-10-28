@@ -37,7 +37,7 @@
 //
 // If you need to do something very different from this, use a Mutex.
 
-#include <glog/logging.h>
+#include <common/logging.h>
 
 #include "gutil/atomicops.h"
 #include "gutil/integral_types.h"

@@ -2,12 +2,12 @@
 
 #include "gutil/strings/substitute.h"
 
-#include <glog/logging.h>
+#include <common/logging.h>
 #include "gutil/logging-inl.h"
 #include "gutil/macros.h"
+#include "gutil/stl_util.h"
 #include "gutil/strings/ascii_ctype.h"
 #include "gutil/strings/escaping.h"
-#include "gutil/stl_util.h"
 
 namespace strings {
 

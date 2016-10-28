@@ -25,7 +25,7 @@
 
 #include <stddef.h>
 
-#include <glog/logging.h>
+#include <common/logging.h>
 
 #include "gutil/logging-inl.h"
 #include "gutil/macros.h"

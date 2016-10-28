@@ -2,7 +2,7 @@
 //
 // A collection of useful (static) bit-twiddling functions.
 
-#include <glog/logging.h>
+#include <common/logging.h>
 
 #include "gutil/basictypes.h"
 #include "gutil/integral_types.h"

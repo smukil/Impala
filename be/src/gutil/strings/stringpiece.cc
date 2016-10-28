@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <climits>
 #include <string>
-#include <glog/logging.h>
+#include <common/logging.h>
 
 #include "gutil/hash/hash.h"
 #include "gutil/logging-inl.h"

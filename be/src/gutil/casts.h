@@ -14,7 +14,7 @@
 #include <string.h>         // for memcpy
 #include <limits.h>         // for enumeration casts and tests
 
-#include <glog/logging.h>
+#include <common/logging.h>
 
 #include "gutil/macros.h"
 #include "gutil/template_util.h"

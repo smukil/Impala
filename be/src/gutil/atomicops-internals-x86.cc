@@ -26,9 +26,9 @@
 
 #include <string.h>
 
-#include <glog/logging.h>
-#include "gutil/logging-inl.h"
+#include <common/logging.h>
 #include "gutil/integral_types.h"
+#include "gutil/logging-inl.h"
 
 // This file only makes sense with atomicops-internals-x86.h -- it
 // depends on structs that are defined in that file.  If atomicops.h

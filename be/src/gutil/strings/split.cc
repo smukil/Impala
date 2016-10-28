@@ -13,14 +13,14 @@ using std::iterator_traits;
 #include <limits>
 using std::numeric_limits;
 
+#include <common/logging.h>
+#include "gutil/hash/hash.h"
 #include "gutil/integral_types.h"
-#include <glog/logging.h>
 #include "gutil/logging-inl.h"
 #include "gutil/macros.h"
-#include "gutil/strtoint.h"
 #include "gutil/strings/ascii_ctype.h"
 #include "gutil/strings/util.h"
-#include "gutil/hash/hash.h"
+#include "gutil/strtoint.h"
 
 // Implementations for some of the Split2 API. Much of the Split2 API is
 // templated so it exists in header files, either strings/split.h or

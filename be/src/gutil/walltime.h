@@ -22,7 +22,7 @@
 #include <sys/time.h>
 
 #include <string>
-#include <glog/logging.h>
+#include <common/logging.h>
 using std::string;
 
 #if defined(__APPLE__)

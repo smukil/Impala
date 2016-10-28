@@ -19,14 +19,14 @@ using std::numeric_limits;
 #include <string>
 using std::string;
 
+#include <common/logging.h>
+#include "gutil/gscoped_ptr.h"
 #include "gutil/int128.h"
 #include "gutil/integral_types.h"
-#include <glog/logging.h>
 #include "gutil/logging-inl.h"
-#include "gutil/gscoped_ptr.h"
 #include "gutil/stringprintf.h"
-#include "gutil/strtoint.h"
 #include "gutil/strings/ascii_ctype.h"
+#include "gutil/strtoint.h"
 
 // Reads a <double> in *text, which may not be whitespace-initiated.
 // *len is the length, or -1 if text is '\0'-terminated, which is more

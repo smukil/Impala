@@ -7,7 +7,7 @@
 #include <stdio.h> // MSVC requires this for _vsnprintf
 #include <vector>
 using std::vector;
-#include <glog/logging.h>
+#include <common/logging.h>
 #include "gutil/logging-inl.h"
 #include "gutil/macros.h"
 

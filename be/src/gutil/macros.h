@@ -39,6 +39,7 @@ template <bool>
 struct CompileAssert {
 };
 
+#ifndef COMPILE_ASSERT
 #define COMPILE_ASSERT(expr, msg) \
   typedef CompileAssert<(bool(expr))> msg[bool(expr) ? 1 : -1] ATTRIBUTE_UNUSED
 
@@ -269,5 +270,7 @@ enum LinkerInitialized { LINKER_INITIALIZED };
 #ifndef FALLTHROUGH_INTENDED
 #define FALLTHROUGH_INTENDED do { } while (0)
 #endif
+
+#endif // ifndef COMPILE_ASSERT
 
 #endif  // BASE_MACROS_H_

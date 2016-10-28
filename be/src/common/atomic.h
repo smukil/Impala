@@ -99,7 +99,8 @@ class AtomicInt {
   ///  }
   ///  return false;
   ALWAYS_INLINE bool CompareAndSwap(T old_val, T new_val) {
-    return base::subtle::Barrier_CompareAndSwap(&value_, old_val, new_val) == old_val;
+    base::subtle::MemoryBarrier();
+    return base::subtle::Release_CompareAndSwap(&value_, old_val, new_val) == old_val;
   }
 
  private:

@@ -17,6 +17,8 @@
 
 cmake_minimum_required(VERSION 2.6)
 
+INCLUDE_DIRECTORIES(${GLOG_INCLUDE_DIR})
+
 set(GUTIL_SRCS
   atomicops-internals-x86.cc
   bits.cc

@@ -4,7 +4,7 @@
 
 #include "gutil/ref_counted.h"
 
-#include <glog/logging.h>
+#include <common/logging.h>
 #include "gutil/threading/thread_collision_warner.h"
 
 namespace kudu {
