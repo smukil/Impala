@@ -285,6 +285,7 @@ set (IMPALA_LINK_LIBS
   Exprs
   GlobalFlags
   ImpalaThrift
+  kudu_util
   Rpc
   Runtime
   Scheduling
