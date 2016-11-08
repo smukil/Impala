@@ -28,6 +28,7 @@
 #include "kudu/gutil/spinlock.h"
 #include "kudu/gutil/stringprintf.h"
 #include "kudu/gutil/strings/numbers.h"
+#include "kudu/gutil/hash/city.h"
 #include "kudu/util/debug/sanitizer_scopes.h"
 #include "kudu/util/env.h"
 #include "kudu/util/errno.h"

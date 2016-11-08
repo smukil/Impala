@@ -750,7 +750,7 @@ void TraceEvent::AppendAsJSON(std::string* out) const {
 }
 
 void TraceEvent::AppendPrettyPrinted(std::ostringstream* out) const {
-  *out << name_ << "[";
+  *out << string(name_) << "[";
   *out << TraceLog::GetCategoryGroupName(category_group_enabled_);
   *out << "]";
   if (arg_names_[0]) {

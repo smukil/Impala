@@ -57,7 +57,8 @@ const char* TraceMetrics::InternName(const string& name) {
   (*g_intern_map)[name] = dup;
 
   // We don't expect this map to grow large.
-  DCHECK_LT(g_intern_map->size(), 100) << "Too many interned strings: " << *g_intern_map;
+  DCHECK_LT(g_intern_map->size(), 100) << "Too many interned strings: ";
+  // TODO(KRPC) Why does stl_logging not work? << *g_intern_map;
 
   return dup;
 }

@@ -30,6 +30,7 @@
 
 #include <functional>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -306,7 +307,7 @@ static int pipe2(int pipefd[2], int flags) {
 #endif
 
 Status Subprocess::Start() {
-  VLOG(2) << "Invoking command: " << argv_;
+  VLOG(2) << "Invoking command: "; // << argv_;
   if (state_ != kNotStarted) {
     const string err_str = Substitute("$0: illegal sub-process state", state_);
     LOG(DFATAL) << err_str;

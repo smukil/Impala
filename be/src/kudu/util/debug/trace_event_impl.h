@@ -6,6 +6,7 @@
 #define KUDU_UTIL_DEBUG_TRACE_EVENT_IMPL_H_
 
 #include <stack>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>

@@ -177,7 +177,7 @@ set(UTIL_SRCS
   trace_metrics.cc
   user.cc
   url-coding.cc
-  version_info.cc
+#  version_info.cc TODO(KRPC): Consider re-adding
   zlib.cc
 )
 
@@ -186,16 +186,16 @@ set(UTIL_SRCS
 # optimized regardless of the default optimization options.
 set_source_files_properties(memory/overwrite.cc PROPERTIES COMPILE_FLAGS "-O3")
 
-if(NOT APPLE)
-  set(UTIL_SRCS
-    ${UTIL_SRCS}
-    nvm_cache.cc)
-endif()
+# if(NOT APPLE)
+#   set(UTIL_SRCS
+#     ${UTIL_SRCS}
+#     nvm_cache.cc)
+# endif()
 
 set(UTIL_LIBS
   crcutil
-  gflags
-  glog
+#  gflags
+#  glog
   gutil
   histogram_proto
   libev
@@ -203,14 +203,16 @@ set(UTIL_LIBS
   pb_util_proto
   protobuf
   version_info_proto
-  zlib)
+  # zlib
+  )
 
 if(NOT APPLE)
   set(UTIL_LIBS
     ${UTIL_LIBS}
-    dl
-    rt
-    vmem)
+ #   dl
+ #   rt
+ #   vmem
+)
 endif()
 
 # We use MallocExtension, but not in the exported version of the library.

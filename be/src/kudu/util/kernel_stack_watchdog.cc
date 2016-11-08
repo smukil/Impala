@@ -26,6 +26,7 @@
 #include "kudu/gutil/strings/substitute.h"
 #include "kudu/util/debug-util.h"
 #include "kudu/util/env.h"
+#include "kudu/util/faststring.h"
 #include "kudu/util/flag_tags.h"
 #include "kudu/util/status.h"
 #include "kudu/util/thread.h"
