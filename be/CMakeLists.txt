@@ -288,9 +288,15 @@ set (IMPALA_LINK_LIBS
   Exec
   Exprs
   GlobalFlags
+  histogram_proto
   ImpalaThrift
   kudu_util
+  krpc
+  prototest
   Rpc
+  rpc_header_proto
+  rpc_introspection_proto
+  pb_util_proto
   Runtime
   Scheduling
   Service
@@ -336,10 +342,13 @@ set (IMPALA_DEPENDENCIES
   ${LBER_LIBRARY}
   ThriftSaslTransport
   ${OPENSSL_LIBS}
+  crcutil
   gutil
   glogstatic
   gflagsstatic
   pprofstatic
+  protobuf
+  libev
   breakpad
   ${HDFS_LIB}
   ${LIBZ}
