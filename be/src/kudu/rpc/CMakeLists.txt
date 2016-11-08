@@ -123,4 +123,3 @@ ADD_KUDU_TEST(rpc-test)
 ADD_KUDU_TEST(rpc_stub-test)
 ADD_KUDU_TEST(sasl_rpc-test)
 ADD_KUDU_TEST(service_queue-test)
-

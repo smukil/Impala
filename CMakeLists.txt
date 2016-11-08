@@ -315,6 +315,10 @@ ADD_THIRDPARTY_LIB(protoc
   DEPS protobuf)
 
 find_package(LibEv REQUIRED)
+include_directories(SYSTEM ${LIBEV_INCLUDE_DIR})
+ADD_THIRDPARTY_LIB(libev
+  STATIC_LIB "${LIBEV_STATIC_LIB}"
+  SHARED_LIB "${LIBEV_SHARED_LIB}")
 
 ###################################################################
 
