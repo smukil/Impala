@@ -98,17 +98,13 @@ Status InProcessImpalaServer::StartWithClientServers(int beeswax_port, int hs2_p
   RETURN_IF_ERROR(exec_env_->StartServices());
   beeswax_port_ = beeswax_port;
   hs2_port_ = hs2_port;
-  ThriftServer* be_server;
   ThriftServer* hs2_server;
   ThriftServer* beeswax_server;
   RETURN_IF_ERROR(CreateImpalaServer(exec_env_.get(), beeswax_port, hs2_port,
-                                     backend_port_, &beeswax_server, &hs2_server,
-                                     &be_server, &impala_server_));
-  be_server_.reset(be_server);
+                                     &beeswax_server, &hs2_server, &impala_server_));
   hs2_server_.reset(hs2_server);
   beeswax_server_.reset(beeswax_server);
 
-  RETURN_IF_ERROR(be_server_->Start());
   RETURN_IF_ERROR(hs2_server_->Start());
   RETURN_IF_ERROR(beeswax_server_->Start());
 
@@ -119,16 +115,12 @@ Status InProcessImpalaServer::StartWithClientServers(int beeswax_port, int hs2_p
 
 Status InProcessImpalaServer::StartAsBackendOnly(bool use_statestore) {
   RETURN_IF_ERROR(exec_env_->StartServices());
-  ThriftServer* be_server;
-  RETURN_IF_ERROR(CreateImpalaServer(exec_env_.get(), 0, 0, backend_port_, NULL, NULL,
-                                     &be_server, &impala_server_));
-  be_server_.reset(be_server);
-  RETURN_IF_ERROR(be_server_->Start());
+  RETURN_IF_ERROR(CreateImpalaServer(exec_env_.get(), 0, 0, nullptr, nullptr,
+                                     &impala_server_));
   return Status::OK();
 }
 
 Status InProcessImpalaServer::Join() {
-  be_server_->Join();
   return Status::OK();
 }
 

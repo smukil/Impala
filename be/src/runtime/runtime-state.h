@@ -126,9 +126,6 @@ class RuntimeState {
   ExecEnv* exec_env() { return exec_env_; }
   DataStreamMgr* stream_mgr() { return exec_env_->stream_mgr(); }
   HBaseTableFactory* htable_factory() { return exec_env_->htable_factory(); }
-  ImpalaBackendClientCache* impalad_client_cache() {
-    return exec_env_->impalad_client_cache();
-  }
   CatalogServiceClientCache* catalogd_client_cache() {
     return exec_env_->catalogd_client_cache();
   }

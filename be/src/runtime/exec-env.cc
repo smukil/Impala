@@ -26,7 +26,6 @@
 #include "common/logging.h"
 #include "gen-cpp/CatalogService.h"
 #include "gen-cpp/ImpalaInternalService.h"
-#include "runtime/backend-client.h"
 #include "runtime/client-cache.h"
 #include "runtime/coordinator.h"
 #include "runtime/data-stream-mgr.h"
@@ -126,10 +125,6 @@ ExecEnv* ExecEnv::exec_env_ = NULL;
 ExecEnv::ExecEnv()
   : metrics_(new MetricGroup("impala-metrics")),
     stream_mgr_(new DataStreamMgr(metrics_.get())),
-    impalad_client_cache_(
-        new ImpalaBackendClientCache(FLAGS_backend_client_connection_num_retries, 0,
-            FLAGS_backend_client_rpc_timeout_ms, FLAGS_backend_client_rpc_timeout_ms, "",
-            !FLAGS_ssl_client_ca_certificate.empty())),
     catalogd_client_cache_(
         new CatalogServiceClientCache(FLAGS_catalog_client_connection_num_retries, 0,
             FLAGS_catalog_client_rpc_timeout_ms, FLAGS_catalog_client_rpc_timeout_ms, "",
@@ -181,10 +176,6 @@ ExecEnv::ExecEnv(const string& hostname, int backend_port, int subscriber_port,
     int webserver_port, const string& statestore_host, int statestore_port)
   : metrics_(new MetricGroup("impala-metrics")),
     stream_mgr_(new DataStreamMgr(metrics_.get())),
-    impalad_client_cache_(
-        new ImpalaBackendClientCache(FLAGS_backend_client_connection_num_retries, 0,
-            FLAGS_backend_client_rpc_timeout_ms, FLAGS_backend_client_rpc_timeout_ms, "",
-            !FLAGS_ssl_client_ca_certificate.empty())),
     catalogd_client_cache_(
         new CatalogServiceClientCache(FLAGS_catalog_client_connection_num_retries, 0,
             FLAGS_catalog_client_rpc_timeout_ms, FLAGS_catalog_client_rpc_timeout_ms, "",
@@ -293,7 +284,6 @@ Status ExecEnv::StartServices() {
   rpc_mgr_->RegisterWebpages(webserver_.get());
 
   metrics_->Init(enable_webserver_ ? webserver_.get() : NULL);
-  impalad_client_cache_->InitMetrics(metrics_.get(), "impala-server.backends");
   catalogd_client_cache_->InitMetrics(metrics_.get(), "catalog.server");
   RETURN_IF_ERROR(RegisterMemoryMetrics(metrics_.get(), true));
 

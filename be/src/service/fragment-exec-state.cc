@@ -25,7 +25,6 @@
 #include "gutil/strings/substitute.h"
 #include "runtime/runtime-filter-bank.h"
 #include "util/bloom-filter.h"
-#include "runtime/backend-client.h"
 #include "service/prototest.pb.h"
 #include "rpc/rpc-mgr.h"
 
@@ -81,16 +80,6 @@ void FragmentMgr::FragmentExecState::ReportStatusCb(
     const Status& status, RuntimeProfile* profile, bool done) {
   DCHECK(status.ok() || done);  // if !status.ok() => done
   Status exec_status = UpdateStatus(status);
-
-  Status coord_status;
-  ImpalaBackendConnection coord(client_cache_, coord_address(), &coord_status);
-  if (!coord_status.ok()) {
-    stringstream s;
-    s << "Couldn't get a client for " << coord_address() <<"\tReason: "
-      << coord_status.GetDetail();
-    UpdateStatus(Status(ErrorMsg(TErrorCode::INTERNAL_ERROR, s.str())));
-    return;
-  }
 
   TReportExecStatusParams params;
   params.protocol_version = ImpalaInternalServiceVersion::V1;

@@ -49,7 +49,6 @@
 #include "gen-cpp/Partitions_types.h"
 #include "gen-cpp/PlanNodes_types.h"
 #include "kudu/util/net/net_util.h"
-#include "runtime/backend-client.h"
 #include "runtime/data-stream-mgr.h"
 #include "runtime/data-stream-sender.h"
 #include "runtime/exec-env.h"

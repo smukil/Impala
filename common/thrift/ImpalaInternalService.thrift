@@ -593,22 +593,3 @@ struct TPoolConfig {
   // Default query options that are applied to requests mapped to this pool.
   5: required string default_query_options;
 }
-
-service ImpalaInternalService {
-  // Called by coord to start asynchronous execution of plan fragment in backend.
-  // Returns as soon as all incoming data streams have been set up.
-  TExecPlanFragmentResult ExecPlanFragment(1:TExecPlanFragmentParams params);
-
-  // Periodically called by backend to report status of plan fragment execution
-  // back to coord; also called when execution is finished, for whatever reason.
-  TReportExecStatusResult ReportExecStatus(1:TReportExecStatusParams params);
-
-  // Called by coord to cancel execution of a single plan fragment, which this
-  // coordinator initiated with a prior call to ExecPlanFragment.
-  // Cancellation is asynchronous.
-  TCancelPlanFragmentResult CancelPlanFragment(1:TCancelPlanFragmentParams params);
-
-  // Called by sender to transmit single row batch. Returns error indication
-  // if params.fragmentId or params.destNodeId are unknown or if data couldn't be read.
-  TTransmitDataResult TransmitData(1:TTransmitDataParams params);
-}

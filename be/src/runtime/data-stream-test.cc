@@ -32,7 +32,6 @@
 #include "runtime/data-stream-recvr.h"
 #include "runtime/descriptors.h"
 #include "runtime/client-cache.h"
-#include "runtime/backend-client.h"
 #include "runtime/mem-tracker.h"
 #include "runtime/raw-value.inline.h"
 #include "service/fe-support.h"
@@ -609,20 +608,22 @@ TEST_F(DataStreamTest, CloseRecvrWhileReferencesRemain) {
   // Send an eos RPC to the receiver. Not required for tear-down, but confirms that the
   // RPC does not cause an error (the receiver will still be called, since it is only
   // Close()'d, not deleted from the data stream manager).
-  Status rpc_status;
-  ImpalaBackendConnection client(exec_env_.impalad_client_cache(),
-      MakeNetworkAddress("localhost", FLAGS_port), &rpc_status);
-  EXPECT_TRUE(rpc_status.ok());
-  TTransmitDataParams params;
-  params.protocol_version = ImpalaInternalServiceVersion::V1;
-  params.__set_eos(true);
-  params.__set_dest_fragment_instance_id(instance_id);
-  params.__set_dest_node_id(DEST_NODE_ID);
-  TUniqueId dummy_id;
-  params.__set_sender_id(0);
 
-  TTransmitDataResult result;
-  rpc_status = client.DoRpc(&ImpalaBackendClient::TransmitData, params, &result);
+  // TODO(KRPC): Re-enable this.
+  // Status rpc_status;
+  // ImpalaBackendConnection client(exec_env_.impalad_client_cache(),
+  //     MakeNetworkAddress("localhost", FLAGS_port), &rpc_status);
+  // EXPECT_TRUE(rpc_status.ok());
+  // TTransmitDataParams params;
+  // params.protocol_version = ImpalaInternalServiceVersion::V1;
+  // params.__set_eos(true);
+  // params.__set_dest_fragment_instance_id(instance_id);
+  // params.__set_dest_node_id(DEST_NODE_ID);
+  // TUniqueId dummy_id;
+  // params.__set_sender_id(0);
+
+  // TTransmitDataResult result;
+  // rpc_status = client.DoRpc(&ImpalaBackendClient::TransmitData, params, &result);
 
   // Finally, stream_recvr destructor happens here. Before fix for IMPALA-2931, this
   // would have resulted in a crash.

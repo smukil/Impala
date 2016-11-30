@@ -100,9 +100,6 @@ class InProcessImpalaServer {
   /// ExecEnv holds much of the per-service state
   boost::scoped_ptr<ExecEnv> exec_env_;
 
-  /// Backend Thrift server
-  boost::scoped_ptr<ThriftServer> be_server_;
-
   /// Frontend HiveServer2 server
   boost::scoped_ptr<ThriftServer> hs2_server_;
 

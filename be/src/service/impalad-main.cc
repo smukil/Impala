@@ -85,10 +85,9 @@ int ImpaladMain(int argc, char** argv) {
 
   ThriftServer* beeswax_server = NULL;
   ThriftServer* hs2_server = NULL;
-  ThriftServer* be_server = NULL;
   ImpalaServer* server = NULL;
   ABORT_IF_ERROR(CreateImpalaServer(&exec_env, FLAGS_beeswax_port, FLAGS_hs2_port,
-      FLAGS_be_port, &beeswax_server, &hs2_server, &be_server, &server));
+      &beeswax_server, &hs2_server, &server));
 
   ABORT_IF_ERROR(beeswax_server->Start());
   ABORT_IF_ERROR(hs2_server->Start());
@@ -113,7 +112,6 @@ int ImpaladMain(int argc, char** argv) {
   beeswax_server->Join();
   hs2_server->Join();
 
-  delete be_server;
   delete beeswax_server;
   delete hs2_server;
 

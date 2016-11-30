@@ -29,17 +29,10 @@ template<class T>
 class ClientConnection;
 
 /// Common cache / connection types
-class ImpalaInternalServiceClient;
-typedef ClientCache<ImpalaInternalServiceClient> ImpalaInternalServiceClientCache;
-typedef ClientConnection<ImpalaInternalServiceClient> ImpalaInternalServiceConnection;
-
 class CatalogServiceClient;
 typedef ClientCache<CatalogServiceClient> CatalogServiceClientCache;
 typedef ClientConnection<CatalogServiceClient> CatalogServiceConnection;
 
-class ImpalaBackendClient;
-typedef ClientCache<ImpalaBackendClient> ImpalaBackendClientCache;
-typedef ClientConnection<ImpalaBackendClient> ImpalaBackendConnection;
 }
 
 #endif

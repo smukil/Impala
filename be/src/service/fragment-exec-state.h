@@ -38,7 +38,7 @@ class FragmentMgr::FragmentExecState {
       executor_(exec_env, boost::bind<void>(
           boost::mem_fn(&FragmentMgr::FragmentExecState::ReportStatusCb),
               this, _1, _2, _3)),
-      client_cache_(exec_env->impalad_client_cache()), exec_params_(params) {
+      exec_params_(params) {
   }
 
   /// Calling the d'tor releases all memory and closes all data streams
@@ -72,7 +72,6 @@ class FragmentMgr::FragmentExecState {
   TQueryCtx query_ctx_;
   TPlanFragmentInstanceCtx fragment_instance_ctx_;
   PlanFragmentExecutor executor_;
-  ImpalaBackendClientCache* client_cache_;
   TExecPlanFragmentParams exec_params_;
 
   /// the thread executing this plan fragment

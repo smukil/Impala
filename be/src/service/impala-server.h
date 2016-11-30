@@ -942,20 +942,18 @@ class ImpalaServer : public ImpalaServiceIf, public ImpalaHiveServer2ServiceIf,
 };
 
 /// Create an ImpalaServer and Thrift servers.
-/// If beeswax_port != 0 (and fe_server != NULL), creates a ThriftServer exporting
+/// If beeswax_port != 0 (and beeswax_server != NULL), creates a ThriftServer exporting
 /// ImpalaService (Beeswax) on beeswax_port (returned via beeswax_server).
 /// If hs2_port != 0 (and hs2_server != NULL), creates a ThriftServer exporting
 /// ImpalaHiveServer2Service on hs2_port (returned via hs2_server).
-/// If be_port != 0 (and be_server != NULL), create a ThriftServer exporting
-/// ImpalaInternalService on be_port (returned via be_server).
-/// Returns created ImpalaServer. The caller owns fe_server and be_server.
+/// Returns created ImpalaServer. The caller owns beeswax_server and hs2_server.
 /// The returned ImpalaServer is referenced by both of these via shared_ptrs and will be
 /// deleted automatically.
 /// Returns OK unless there was some error creating the servers, in
 /// which case none of the output parameters can be assumed to be valid.
 Status CreateImpalaServer(ExecEnv* exec_env, int beeswax_port, int hs2_port,
-    int be_port, ThriftServer** beeswax_server, ThriftServer** hs2_server,
-    ThriftServer** be_server, ImpalaServer** impala_server);
+    ThriftServer** beeswax_server, ThriftServer** hs2_server,
+    ImpalaServer** impala_server);
 
 }
 

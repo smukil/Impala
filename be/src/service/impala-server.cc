@@ -1524,7 +1524,10 @@ void ImpalaServer::MembershipCallback(
             vector<TNetworkAddress>& failed_hosts = queries_to_cancel[*query_id];
             failed_hosts.push_back(loc_entry->first);
           }
-          exec_env_->impalad_client_cache()->CloseConnections(loc_entry->first);
+
+          // TODO(KRPC): Do we need to destroy connections from RpcMgr? Probably not,
+          // because they time out.
+
           // We can remove the location wholesale once we know backend's failed. To do so
           // safely during iteration, we have to be careful not in invalidate the current
           // iterator, so copy the iterator to do the erase(..) and advance the original.
@@ -1823,12 +1826,10 @@ void ImpalaServer::RegisterSessionTimeout(int32_t session_timeout) {
   }
 }
 
-Status CreateImpalaServer(ExecEnv* exec_env, int beeswax_port, int hs2_port, int be_port,
-    ThriftServer** beeswax_server, ThriftServer** hs2_server, ThriftServer** be_server,
-    ImpalaServer** impala_server) {
+Status CreateImpalaServer(ExecEnv* exec_env, int beeswax_port, int hs2_port,
+    ThriftServer** beeswax_server, ThriftServer** hs2_server, ImpalaServer** impala_server) {
   DCHECK((beeswax_port == 0) == (beeswax_server == NULL));
   DCHECK((hs2_port == 0) == (hs2_server == NULL));
-  DCHECK((be_port == 0) == (be_server == NULL));
 
   boost::shared_ptr<ImpalaServer> handler(new ImpalaServer(exec_env));
 

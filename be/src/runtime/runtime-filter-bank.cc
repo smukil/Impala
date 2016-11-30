@@ -25,7 +25,6 @@
 
 #include "runtime/client-cache.h"
 #include "runtime/exec-env.h"
-#include "runtime/backend-client.h"
 #include "runtime/mem-tracker.h"
 #include "runtime/runtime-filter.inline.h"
 #include "service/impala-server.h"

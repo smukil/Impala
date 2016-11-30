@@ -32,7 +32,6 @@
 #include "runtime/runtime-state.h"
 #include "runtime/client-cache.h"
 #include "runtime/mem-tracker.h"
-#include "runtime/backend-client.h"
 #include "util/aligned-new.h"
 #include "util/debug-util.h"
 #include "util/network-util.h"
@@ -165,15 +164,11 @@ class DataStreamSender::Channel : public CacheLineAligned {
   // Returns SendBatch() status.
   Status SendCurrentBatch();
 
-  // Synchronously call TransmitData() on a client from impalad_client_cache and
-  // update rpc_status_ based on return value (or set to error if RPC failed).
+  // Synchronously call TransmitData() and update rpc_status_ based on return value (or
+  // set to error if RPC failed).
   // Called from a thread from the rpc_thread_ pool.
   void TransmitData(int thread_id, const TRowBatch*);
   void TransmitDataHelper(const TRowBatch*);
-
-  // Send RPC and retry waiting for response if get RPC timeout error.
-  Status DoTransmitDataRpc(ImpalaBackendConnection* client,
-      const TTransmitDataParams& params, TTransmitDataResult* res);
 };
 
 Status DataStreamSender::Channel::Init(RuntimeState* state) {
@@ -249,16 +244,6 @@ void DataStreamSender::Channel::TransmitDataHelper(const TRowBatch* batch) {
     VLOG_ROW << "incremented #data_bytes_sent="
              << num_data_bytes_sent_;
   }
-}
-
-Status DataStreamSender::Channel::DoTransmitDataRpc(ImpalaBackendConnection* client,
-    const TTransmitDataParams& params, TTransmitDataResult* res) {
-  Status status = client->DoRpc(&ImpalaBackendClient::TransmitData, params, res);
-  while (status.code() == TErrorCode::RPC_RECV_TIMEOUT &&
-      !runtime_state_->is_cancelled()) {
-    status = client->RetryRpcRecv(&ImpalaBackendClient::recv_TransmitData, res);
-  }
-  return status;
 }
 
 void DataStreamSender::Channel::WaitForRpc() {
