@@ -140,12 +140,6 @@ struct TRegisterSubscriberResponse {
   2: optional Types.TUniqueId registration_id;
 }
 
-service StatestoreService {
-  // Register a single subscriber. Note that after a subscriber is registered, no new
-  // topics may be added.
-  TRegisterSubscriberResponse RegisterSubscriber(1: TRegisterSubscriberRequest params);
-}
-
 struct TUpdateStateRequest {
   1: required StatestoreServiceVersion protocol_version =
       StatestoreServiceVersion.V1
@@ -176,21 +170,4 @@ struct THeartbeatRequest {
 
 struct THeartbeatResponse {
 
-}
-
-service StatestoreSubscriber {
-  // Called when the statestore sends a topic update. The request contains a map of
-  // topic names to TTopicDelta updates, sent from the statestore to the subscriber. Each
-  // of these delta updates will contain a list of additions to the topic and a list of
-  // deletions from the topic.
-  // In response, the subscriber returns an aggregated list of updates to topic(s) to
-  // the statestore. Each update is a TTopicDelta that contains a list of additions to
-  // the topic and a list of deletions from the topic. Additionally, if a subscriber has
-  // received an unexpected delta update version range, they can request a new delta
-  // update based off a specific version from the statestore. The next statestore
-  // delta update will be based off of the version the subscriber requested.
-  TUpdateStateResponse UpdateState(1: TUpdateStateRequest params);
-
-  // Called when the statestore sends a heartbeat.
-  THeartbeatResponse Heartbeat(1: THeartbeatRequest params);
 }

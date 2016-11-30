@@ -25,11 +25,18 @@
 #include "common/status.h"
 #include "gen-cpp/StatestoreService_types.h"
 #include "statestore/failure-detector.h"
+#include "service/prototest.pb.h"
+#include "service/prototest.service.h"
+#include "service/prototest.proxy.h"
+#include "rpc/rpc-mgr.h"
 #include "rpc/thrift-util.h"
 #include "util/debug-util.h"
 #include "util/time.h"
 #include "util/uid-util.h"
 #include "util/webserver.h"
+#include "kudu/rpc/rpc_controller.h"
+#include "kudu/util/net/net_util.h"
+#include "exec/kudu-util.h"
 
 #include "common/names.h"
 
@@ -37,6 +44,17 @@ using namespace apache::thrift;
 using namespace impala;
 using namespace rapidjson;
 using namespace strings;
+
+using kudu::rpc_test::RegisterSubscriberRequestPB;
+using kudu::rpc_test::RegisterSubscriberResponsePB;
+using kudu::rpc_test::UpdateStateRequestPB;
+using kudu::rpc_test::UpdateStateResponsePB;
+using kudu::rpc_test::HeartbeatRequestPB;
+using kudu::rpc_test::HeartbeatResponsePB;
+using kudu::rpc::RpcContext;
+using kudu::rpc::RpcController;
+using kudu::HostPort;
+using kudu::rpc_test::StatestoreSubscriberProxy;
 
 DEFINE_int32(statestore_max_missed_heartbeats, 10, "Maximum number of consecutive "
     "heartbeat messages an impalad can miss before being declared failed by the "
@@ -99,7 +117,36 @@ const int32_t STATESTORE_MAX_SUBSCRIBERS = 10000;
 // Updates or heartbeats that miss their deadline by this much are logged.
 const uint32_t DEADLINE_MISS_THRESHOLD_MS = 2000;
 
-typedef ClientConnection<StatestoreSubscriberClient> StatestoreSubscriberConnection;
+class StatestoreServiceImpl : public kudu::rpc_test::StatestoreServiceIf {
+ public:
+  StatestoreServiceImpl(const scoped_refptr<kudu::MetricEntity>& entity,
+      const scoped_refptr<kudu::rpc::ResultTracker> tracker) : StatestoreServiceIf(entity, tracker) {
+  }
+
+  void set_statestore(Statestore* statestore) { statestore_ = statestore; }
+
+  virtual void RegisterSubscriber(const RegisterSubscriberRequestPB* request,
+      RegisterSubscriberResponsePB* response, RpcContext* context) {
+    DCHECK(statestore_ != nullptr);
+    TRegisterSubscriberRequest params;
+    Status status = DeserializeThriftFromProtoWrapper(*request, true, &params);
+
+    TRegisterSubscriberResponse thrift_response;
+    if (status.ok()) {
+      TUniqueId registration_id;
+      status = statestore_->RegisterSubscriber(params.subscriber_id,
+          params.subscriber_location, params.topic_registrations, &registration_id);
+      thrift_response.__set_registration_id(registration_id);
+      SerializeThriftToProtoWrapper(&thrift_response, true, response);
+    }
+
+    status.ToThrift(&thrift_response.status);
+    context->RespondSuccess();
+  }
+
+ private:
+  Statestore* statestore_ = nullptr;
+};
 
 class StatestoreThriftIf : public StatestoreServiceIf {
  public:
@@ -223,16 +270,12 @@ Statestore::Statestore(MetricGroup* metrics)
         FLAGS_statestore_num_heartbeat_threads,
         STATESTORE_MAX_SUBSCRIBERS,
         bind<void>(mem_fn(&Statestore::DoSubscriberUpdate), this, true, _1, _2)),
-    update_state_client_cache_(new ClientCache<StatestoreSubscriberClient>(1, 0,
-        FLAGS_statestore_update_tcp_timeout_seconds * 1000,
-        FLAGS_statestore_update_tcp_timeout_seconds * 1000)),
-    heartbeat_client_cache_(new ClientCache<StatestoreSubscriberClient>(1, 0,
-        FLAGS_statestore_heartbeat_tcp_timeout_seconds * 1000,
-        FLAGS_statestore_heartbeat_tcp_timeout_seconds * 1000)),
-    thrift_iface_(new StatestoreThriftIf(this)),
     failure_detector_(new MissedHeartbeatFailureDetector(
         FLAGS_statestore_max_missed_heartbeats,
-        FLAGS_statestore_max_missed_heartbeats / 2)) {
+        FLAGS_statestore_max_missed_heartbeats / 2)),
+    rpc_mgr_(new RpcMgr()) {
+
+  // TODO(KRPC): Timeouts
 
   DCHECK(metrics != NULL);
   num_subscribers_metric_ =
@@ -248,8 +291,10 @@ Statestore::Statestore(MetricGroup* metrics)
   heartbeat_duration_metric_ =
       StatsMetric<double>::CreateAndRegister(metrics, STATESTORE_HEARTBEAT_DURATION);
 
-  update_state_client_cache_->InitMetrics(metrics, "subscriber-update-state");
-  heartbeat_client_cache_->InitMetrics(metrics, "subscriber-heartbeat");
+  rpc_mgr_->Start(FLAGS_state_store_port);
+  StatestoreServiceImpl* impl;
+  rpc_mgr_->RegisterService<StatestoreServiceImpl>(&impl);
+  impl->set_statestore(this);
 }
 
 void Statestore::RegisterWebpages(Webserver* webserver) {
@@ -416,16 +461,20 @@ Status Statestore::SendTopicUpdate(Subscriber* subscriber, bool* update_skipped)
   update_state_request.__set_registration_id(subscriber->registration_id());
 
   // Second: try and send it
-  Status status;
-  StatestoreSubscriberConnection client(update_state_client_cache_.get(),
-      subscriber->network_address(), &status);
-  RETURN_IF_ERROR(status);
+  unique_ptr<StatestoreSubscriberProxy> proxy;
+  RETURN_IF_ERROR(rpc_mgr_->GetProxy(subscriber->network_address(), &proxy));
+
+  UpdateStateRequestPB request_proto;
+  UpdateStateResponsePB response_pb;
+  RETURN_IF_ERROR(
+      SerializeThriftToProtoWrapper(&update_state_request, true, &request_proto));
+  RpcController controller;
+  proxy->UpdateState(request_proto, &response_pb, &controller);
 
   TUpdateStateResponse response;
-  RETURN_IF_ERROR(client.DoRpc(
-      &StatestoreSubscriberClient::UpdateState, update_state_request, &response));
+  DeserializeThriftFromProtoWrapper(response_pb, true, &response);
 
-  status = Status(response.status);
+  Status status = Status(response.status);
   if (!status.ok()) {
     topic_update_duration_metric_->Update(sw.ElapsedTime() / (1000.0 * 1000.0 * 1000.0));
     return status;
@@ -596,16 +645,23 @@ Status Statestore::SendHeartbeat(Subscriber* subscriber) {
   MonotonicStopWatch sw;
   sw.Start();
 
-  Status status;
-  StatestoreSubscriberConnection client(heartbeat_client_cache_.get(),
-      subscriber->network_address(), &status);
-  RETURN_IF_ERROR(status);
-
   THeartbeatRequest request;
   THeartbeatResponse response;
   request.__set_registration_id(subscriber->registration_id());
+
+  unique_ptr<StatestoreSubscriberProxy> proxy;
+  RETURN_IF_ERROR(rpc_mgr_->GetProxy(subscriber->network_address(), &proxy));
+
+  HeartbeatRequestPB request_proto;
+  HeartbeatResponsePB response_pb;
   RETURN_IF_ERROR(
-      client.DoRpc(&StatestoreSubscriberClient::Heartbeat, request, &response));
+      SerializeThriftToProtoWrapper(&request, true, &request_proto));
+  RpcController controller;
+  proxy->Heartbeat(request_proto, &response_pb, &controller);
+
+  KUDU_RETURN_IF_ERROR(controller.status(), "RPC Error");
+
+  DeserializeThriftFromProtoWrapper(response_pb, true, &response);
 
   heartbeat_duration_metric_->Update(sw.ElapsedTime() / (1000.0 * 1000.0 * 1000.0));
   return Status::OK();
@@ -722,10 +778,6 @@ void Statestore::UnregisterSubscriber(Subscriber* subscriber) {
     // Already failed and / or replaced with a new registration
     return;
   }
-
-  // Close all active clients so that the next attempt to use them causes a Reopen()
-  update_state_client_cache_->CloseConnections(subscriber->network_address());
-  heartbeat_client_cache_->CloseConnections(subscriber->network_address());
 
   // Prevent the failure detector from growing without bound
   failure_detector_->EvictPeer(PrintId(subscriber->registration_id()));

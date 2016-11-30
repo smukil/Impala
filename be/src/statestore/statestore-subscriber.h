@@ -36,12 +36,11 @@
 namespace impala {
 
 class Status;
+class RpcMgr;
 class TimeoutFailureDetector;
 class Thread;
 class ThriftServer;
 class TNetworkAddress;
-
-typedef ClientCache<StatestoreServiceClient> StatestoreClientCache;
 
 /// A StatestoreSubscriber communicates with a statestore periodically through the exchange
 /// of topic update messages. These messages contain updates from the statestore to a list
@@ -75,7 +74,7 @@ class StatestoreSubscriber {
   StatestoreSubscriber(const std::string& subscriber_id,
       const TNetworkAddress& heartbeat_address,
       const TNetworkAddress& statestore_address,
-      MetricGroup* metrics);
+      RpcMgr* rpc_mgr, MetricGroup* metrics);
 
   /// A TopicDeltaMap is passed to each callback. See UpdateCallback for more details.
   typedef std::map<Statestore::TopicId, TTopicDelta> TopicDeltaMap;
@@ -131,12 +130,8 @@ class StatestoreSubscriber {
   /// Address of the statestore
   TNetworkAddress statestore_address_;
 
-  /// Implementation of the heartbeat thrift interface, which proxies
-  /// calls onto this object.
-  boost::shared_ptr<StatestoreSubscriberIf> thrift_iface_;
-
   /// Container for the heartbeat server.
-  std::shared_ptr<ThriftServer> heartbeat_server_;
+  // std::shared_ptr<ThriftServer> heartbeat_server_;
 
   /// Failure detector that tracks heartbeat messages from the statestore.
   boost::scoped_ptr<impala::TimeoutFailureDetector> failure_detector_;
@@ -192,8 +187,7 @@ class StatestoreSubscriber {
   typedef boost::unordered_map<Statestore::TopicId, int64_t> TopicVersionMap;
   TopicVersionMap current_topic_versions_;
 
-  /// statestore client cache - only one client is ever used.
-  boost::scoped_ptr<StatestoreClientCache> client_cache_;
+  RpcMgr* rpc_mgr_;
 
   /// MetricGroup instance that all metrics are registered in. Not owned by this class.
   MetricGroup* metrics_;
@@ -228,6 +222,7 @@ class StatestoreSubscriber {
 
   /// Subscriber thrift implementation, needs to access UpdateState
   friend class StatestoreSubscriberThriftIf;
+  friend class StatestoreSubscriberImpl;
 
   /// Called when the statestore sends a topic update. Each registered callback is called
   /// in turn with the given map of incoming_topic_deltas from the statestore. Each

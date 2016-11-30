@@ -81,6 +81,7 @@ class CatalogServer {
   MetricGroup* metrics_;
   boost::scoped_ptr<Catalog> catalog_;
   boost::scoped_ptr<StatestoreSubscriber> statestore_subscriber_;
+  boost::scoped_ptr<RpcMgr> rpc_mgr_;
 
   /// Metric that tracks the amount of time taken preparing a catalog update.
   StatsMetric<double>* topic_processing_time_metric_;

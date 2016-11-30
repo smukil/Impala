@@ -159,19 +159,21 @@ InProcessStatestore::InProcessStatestore(int statestore_port, int webserver_port
 
 Status InProcessStatestore::Start() {
   webserver_->Start();
-  boost::shared_ptr<TProcessor> processor(
-      new StatestoreServiceProcessor(statestore_->thrift_iface()));
+  // TODO(KRPC): fix this class.
+  // boost::shared_ptr<TProcessor> processor(
+  //     new StatestoreServiceProcessor(statestore_->thrift_iface()));
 
-  statestore_server_.reset(new ThriftServer("StatestoreService", processor,
-      statestore_port_, NULL, metrics_.get(), 5));
-  if (EnableInternalSslConnections()) {
-    LOG(INFO) << "Enabling SSL for Statestore";
-    ABORT_IF_ERROR(statestore_server_->EnableSsl(
-        FLAGS_ssl_server_certificate, FLAGS_ssl_private_key));
-  }
-  statestore_main_loop_.reset(
-      new Thread("statestore", "main-loop", &Statestore::MainLoop, statestore_.get()));
+  // statestore_server_.reset(new ThriftServer("StatestoreService", processor,
+  //     statestore_port_, NULL, metrics_.get(), 5));
+  // if (EnableInternalSslConnections()) {
+  //   LOG(INFO) << "Enabling SSL for Statestore";
+  //   ABORT_IF_ERROR(statestore_server_->EnableSsl(
+  //       FLAGS_ssl_server_certificate, FLAGS_ssl_private_key));
+  // }
+  // statestore_main_loop_.reset(
+  //     new Thread("statestore", "main-loop", &Statestore::MainLoop, statestore_.get()));
 
-  RETURN_IF_ERROR(statestore_server_->Start());
-  return WaitForServer("localhost", statestore_port_, 10, 100);
+  // RETURN_IF_ERROR(statestore_server_->Start());
+  // return WaitForServer("localhost", statestore_port_, 10, 100);
+  return Status::OK();
 }

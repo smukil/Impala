@@ -31,8 +31,7 @@
 #include "gen-cpp/StatestoreService.h"
 #include "gen-cpp/StatestoreSubscriber.h"
 #include "gen-cpp/Types_types.h"
-#include "rpc/thrift-client.h"
-#include "runtime/client-cache.h"
+#include "rpc/rpc-mgr.h"
 #include "runtime/timestamp-value.h"
 #include "statestore/failure-detector.h"
 #include "util/aligned-new.h"
@@ -113,11 +112,6 @@ class Statestore : public CacheLineAligned {
   //
   /// Returns OK unless there is an unrecoverable error.
   Status MainLoop();
-
-  /// Returns the Thrift API interface that proxies requests onto the local Statestore.
-  const boost::shared_ptr<StatestoreServiceIf>& thrift_iface() const {
-    return thrift_iface_;
-  }
 
   /// Tells the Statestore to shut down. Does not wait for the processing loop to exit
   /// before returning.
@@ -398,23 +392,12 @@ class Statestore : public CacheLineAligned {
 
   ThreadPool<ScheduledSubscriberUpdate> subscriber_heartbeat_threadpool_;
 
-  /// Cache of subscriber clients used for UpdateState() RPCs. Only one client per
-  /// subscriber should be used, but the cache helps with the client lifecycle on failure.
-  boost::scoped_ptr<ClientCache<StatestoreSubscriberClient>> update_state_client_cache_;
-
-  /// Cache of subscriber clients used for Heartbeat() RPCs. Separate from
-  /// update_state_client_cache_ because we enable TCP-level timeouts for these calls,
-  /// whereas they are not safe for UpdateState() RPCs which can take an unbounded amount
-  /// of time.
-  boost::scoped_ptr<ClientCache<StatestoreSubscriberClient>> heartbeat_client_cache_;
-
-  /// Thrift API implementation which proxies requests onto this Statestore
-  boost::shared_ptr<StatestoreServiceIf> thrift_iface_;
-
   /// Failure detector for subscribers. If a subscriber misses a configurable number of
   /// consecutive heartbeat messages, it is considered failed and a) its transient topic
   /// entries are removed and b) its entry in the subscriber map is erased.
   boost::scoped_ptr<MissedHeartbeatFailureDetector> failure_detector_;
+
+  boost::scoped_ptr<RpcMgr> rpc_mgr_;
 
   /// Metric that track the registered, non-failed subscribers.
   IntGauge* num_subscribers_metric_;

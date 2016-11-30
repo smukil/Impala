@@ -31,14 +31,28 @@
 #include "gen-cpp/StatestoreService_types.h"
 #include "rpc/rpc-trace.h"
 #include "rpc/thrift-util.h"
+#include "service/prototest.proxy.h"
+#include "service/prototest.service.h"
 #include "util/time.h"
 #include "util/debug-util.h"
+#include "kudu/util/net/net_util.h"
 
 #include "common/names.h"
 
 using boost::posix_time::seconds;
 using namespace apache::thrift;
 using namespace strings;
+
+using kudu::HostPort;
+using kudu::rpc::RpcController;
+using kudu::rpc::RpcContext;
+using kudu::rpc_test::StatestoreServiceProxy;
+using kudu::rpc_test::RegisterSubscriberRequestPB;
+using kudu::rpc_test::RegisterSubscriberResponsePB;
+using kudu::rpc_test::HeartbeatRequestPB;
+using kudu::rpc_test::HeartbeatResponsePB;
+using kudu::rpc_test::UpdateStateRequestPB;
+using kudu::rpc_test::UpdateStateResponsePB;
 
 DEFINE_int32(statestore_subscriber_timeout_seconds, 30, "The amount of time (in seconds)"
      " that may elapse before the connection with the statestore is considered lost.");
@@ -60,7 +74,53 @@ const string CALLBACK_METRIC_PATTERN = "statestore-subscriber.topic-$0.processin
 // statestore after a failure.
 const int32_t SLEEP_INTERVAL_MS = 5000;
 
-typedef ClientConnection<StatestoreServiceClient> StatestoreConnection;
+class StatestoreSubscriberImpl : public kudu::rpc_test::StatestoreSubscriberIf {
+ public:
+  StatestoreSubscriberImpl(const scoped_refptr<kudu::MetricEntity>& entity,
+      const scoped_refptr<kudu::rpc::ResultTracker> tracker) : kudu::rpc_test::StatestoreSubscriberIf(entity, tracker) {
+  }
+
+  void set_subscriber(StatestoreSubscriber* sub) { subscriber_ = sub; }
+
+  virtual void UpdateState(const UpdateStateRequestPB* request,
+      UpdateStateResponsePB* response, RpcContext* context) {
+    TUpdateStateRequest thrift_request;
+    Status status = DeserializeThriftFromProtoWrapper(*request, true, &thrift_request);
+    TUpdateStateResponse thrift_response;
+    if (status.ok()) {
+      TUniqueId registration_id;
+      if (thrift_request.__isset.registration_id) {
+        registration_id = thrift_request.registration_id;
+      }
+
+      status = subscriber_->UpdateState(thrift_request.topic_deltas, registration_id,
+          &thrift_response.topic_updates, &thrift_response.skipped);
+      thrift_response.__set_skipped(thrift_response.skipped);
+
+    }
+
+    status.ToThrift(&thrift_response.status);
+    SerializeThriftToProtoWrapper(&thrift_response, true, response);
+    context->RespondSuccess();
+  }
+
+  virtual void Heartbeat(const HeartbeatRequestPB* request,
+      HeartbeatResponsePB* response, RpcContext* context) {
+    THeartbeatRequest thrift_request;
+    Status status = DeserializeThriftFromProtoWrapper(*request, true, &thrift_request);
+    if (status.ok()) {
+      subscriber_->Heartbeat(thrift_request.registration_id);
+    }
+
+    THeartbeatResponse thrift_response;
+    SerializeThriftToProtoWrapper(&thrift_response, true, response);
+    context->RespondSuccess();
+  }
+
+ private:
+  StatestoreSubscriber* subscriber_;
+
+};
 
 // Proxy class for the subscriber heartbeat thrift API, which
 // translates RPCs into method calls on the local subscriber object.
@@ -91,17 +151,14 @@ class StatestoreSubscriberThriftIf : public StatestoreSubscriberIf {
 
 StatestoreSubscriber::StatestoreSubscriber(const std::string& subscriber_id,
     const TNetworkAddress& heartbeat_address, const TNetworkAddress& statestore_address,
-    MetricGroup* metrics)
+    RpcMgr* rpc_mgr, MetricGroup* metrics)
     : subscriber_id_(subscriber_id), heartbeat_address_(heartbeat_address),
       statestore_address_(statestore_address),
-      thrift_iface_(new StatestoreSubscriberThriftIf(this)),
       failure_detector_(new TimeoutFailureDetector(
           seconds(FLAGS_statestore_subscriber_timeout_seconds),
           seconds(FLAGS_statestore_subscriber_timeout_seconds / 2))),
       is_registered_(false),
-      client_cache_(new StatestoreClientCache(FLAGS_statestore_subscriber_cnxn_attempts,
-          FLAGS_statestore_subscriber_cnxn_retry_interval_ms, 0, 0, "",
-          !FLAGS_ssl_client_ca_certificate.empty())),
+      rpc_mgr_(rpc_mgr),
       metrics_(metrics->GetOrCreateChildGroup("statestore-subscriber")) {
   connected_to_statestore_metric_ =
       metrics_->AddProperty("statestore-subscriber.connected", false);
@@ -118,8 +175,6 @@ StatestoreSubscriber::StatestoreSubscriber(const std::string& subscriber_id,
 
   registration_id_metric_ = metrics->AddProperty<string>(
       "statestore-subscriber.registration-id", "N/A");
-
-  client_cache_->InitMetrics(metrics, "statestore-subscriber.statestore");
 }
 
 Status StatestoreSubscriber::AddTopic(const Statestore::TopicId& topic_id,
@@ -137,10 +192,6 @@ Status StatestoreSubscriber::AddTopic(const Statestore::TopicId& topic_id,
 }
 
 Status StatestoreSubscriber::Register() {
-  Status client_status;
-  StatestoreConnection client(client_cache_.get(), statestore_address_, &client_status);
-  RETURN_IF_ERROR(client_status);
-
   TRegisterSubscriberRequest request;
   request.topic_registrations.reserve(update_callbacks_.size());
   for (const UpdateCallbacks::value_type& topic: update_callbacks_) {
@@ -152,9 +203,19 @@ Status StatestoreSubscriber::Register() {
 
   request.subscriber_location = heartbeat_address_;
   request.subscriber_id = subscriber_id_;
+
+  RegisterSubscriberRequestPB proto_request;
+  RETURN_IF_ERROR(SerializeThriftToProtoWrapper(&request, true, &proto_request));
+
+  unique_ptr<StatestoreServiceProxy> proxy;
+  RETURN_IF_ERROR(rpc_mgr_->GetProxy(statestore_address_, &proxy));
+  RpcController controller;
+  RegisterSubscriberResponsePB proto_response;
+  proxy->RegisterSubscriber(proto_request, &proto_response, &controller);
+
   TRegisterSubscriberResponse response;
-  RETURN_IF_ERROR(
-      client.DoRpc(&StatestoreServiceClient::RegisterSubscriber, request, &response));
+  DeserializeThriftFromProtoWrapper(proto_response, true, &response);
+
   Status status = Status(response.status);
   if (status.ok()) connected_to_statestore_metric_->set_value(true);
   if (response.__isset.registration_id) {
@@ -181,15 +242,10 @@ Status StatestoreSubscriber::Start() {
     LOG(INFO) << "Starting statestore subscriber";
 
     // Backend must be started before registration
-    boost::shared_ptr<TProcessor> processor(
-        new StatestoreSubscriberProcessor(thrift_iface_));
-    boost::shared_ptr<TProcessorEventHandler> event_handler(
-        new RpcEventHandler("statestore-subscriber", metrics_));
-    processor->setEventHandler(event_handler);
+    StatestoreSubscriberImpl* impl;
+    rpc_mgr_->RegisterService<StatestoreSubscriberImpl>(&impl);
+    impl->set_subscriber(this);
 
-    heartbeat_server_.reset(new ThriftServer("StatestoreSubscriber", processor,
-        heartbeat_address_.port, NULL, NULL, 5));
-    RETURN_IF_ERROR(heartbeat_server_->Start());
     LOG(INFO) << "Registering with statestore";
     status = Register();
     if (status.ok()) {

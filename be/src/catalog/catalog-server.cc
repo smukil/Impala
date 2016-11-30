@@ -155,6 +155,7 @@ CatalogServer::CatalogServer(MetricGroup* metrics)
     catalog_objects_min_version_(0L), catalog_objects_max_version_(0L) {
   topic_processing_time_metric_ = StatsMetric<double>::CreateAndRegister(metrics,
       CATALOG_SERVER_TOPIC_PROCESSING_TIMES);
+  rpc_mgr_.reset(new RpcMgr());
 }
 
 Status CatalogServer::Start() {
@@ -171,9 +172,11 @@ Status CatalogServer::Start() {
       "catalog-update-gathering-thread",
       &CatalogServer::GatherCatalogUpdatesThread, this));
 
+  rpc_mgr_->Start(FLAGS_state_store_subscriber_port);
+
   statestore_subscriber_.reset(new StatestoreSubscriber(
      Substitute("catalog-server@$0", TNetworkAddressToString(server_address)),
-     subscriber_address, statestore_address, metrics_));
+     subscriber_address, statestore_address, rpc_mgr_.get(), metrics_));
 
   StatestoreSubscriber::UpdateCallback cb =
       bind<void>(mem_fn(&CatalogServer::UpdateCatalogTopicCallback), this, _1, _2);

@@ -162,7 +162,7 @@ ExecEnv::ExecEnv()
 
     statestore_subscriber_.reset(new StatestoreSubscriber(
         Substitute("impalad@$0", TNetworkAddressToString(backend_address_)),
-        subscriber_address, statestore_address, metrics_.get()));
+        backend_address_, statestore_address, rpc_mgr_.get(), metrics_.get()));
 
     scheduler_.reset(new SimpleScheduler(statestore_subscriber_.get(),
         statestore_subscriber_->id(), backend_address_, metrics_.get(), webserver_.get(),
@@ -216,7 +216,7 @@ ExecEnv::ExecEnv(const string& hostname, int backend_port, int subscriber_port,
 
     statestore_subscriber_.reset(new StatestoreSubscriber(
         Substitute("impalad@$0", TNetworkAddressToString(backend_address_)),
-        subscriber_address, statestore_address, metrics_.get()));
+        subscriber_address, statestore_address, rpc_mgr_.get(), metrics_.get()));
 
     scheduler_.reset(new SimpleScheduler(statestore_subscriber_.get(),
         statestore_subscriber_->id(), backend_address_, metrics_.get(), webserver_.get(),
