@@ -20,7 +20,6 @@
 #include <sstream>
 
 #include "codegen/llvm-codegen.h"
-#include "gen-cpp/ImpalaInternalService.h"
 #include "rpc/thrift-util.h"
 #include "gutil/strings/substitute.h"
 #include "runtime/runtime-filter-bank.h"

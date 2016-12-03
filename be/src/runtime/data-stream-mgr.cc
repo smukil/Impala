@@ -31,7 +31,6 @@
 #include "util/runtime-profile-counters.h"
 #include "util/uid-util.h"
 
-#include "gen-cpp/ImpalaInternalService.h"
 #include "gen-cpp/ImpalaInternalService_types.h"
 
 #include "common/names.h"

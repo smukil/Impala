@@ -48,7 +48,6 @@
 #include "kudu/util/net/net_util.h"
 
 #include "gen-cpp/Types_types.h"
-#include "gen-cpp/ImpalaInternalService.h"
 #include "gen-cpp/ImpalaInternalService_types.h"
 
 #include "common/names.h"

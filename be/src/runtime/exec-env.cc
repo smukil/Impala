@@ -25,7 +25,6 @@
 
 #include "common/logging.h"
 #include "gen-cpp/CatalogService.h"
-#include "gen-cpp/ImpalaInternalService.h"
 #include "runtime/client-cache.h"
 #include "runtime/coordinator.h"
 #include "runtime/data-stream-mgr.h"

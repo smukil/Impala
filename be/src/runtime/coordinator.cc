@@ -43,7 +43,6 @@
 #include "exec/plan-root-sink.h"
 #include "exec/scan-node.h"
 #include "gen-cpp/Frontend_types.h"
-#include "gen-cpp/ImpalaInternalService.h"
 #include "gen-cpp/ImpalaInternalService_constants.h"
 #include "gen-cpp/ImpalaInternalService_types.h"
 #include "gen-cpp/Partitions_types.h"

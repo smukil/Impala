@@ -21,7 +21,6 @@
 #include <boost/thread/mutex.hpp>
 #include <boost/unordered_map.hpp>
 
-#include "gen-cpp/ImpalaInternalService.h"
 #include "common/status.h"
 #include "util/spinlock.h"
 
