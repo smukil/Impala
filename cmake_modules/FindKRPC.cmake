@@ -77,10 +77,14 @@ function(KRPC_GENERATE SRCS HDRS TGTS)
     list(APPEND ${SRCS} "${PROTO_CC_OUT}" "${SERVICE_CC}" "${PROXY_CC}")
     list(APPEND ${HDRS} "${PROTO_H_OUT}" "${SERVICE_H}" "${PROXY_H}")
 
+    get_filename_component(PROTO_LIB_DIR ${PROTOBUF_SHARED_LIBRARY} DIRECTORY)
+
     add_custom_command(
       OUTPUT "${SERVICE_CC}" "${SERVICE_H}" "${PROXY_CC}" "${PROXY_H}"
-             "${PROTO_CC_OUT}" "${PROTO_H_OUT}"
-      COMMAND  ${PROTOBUF_PROTOC_EXECUTABLE}
+      "${PROTO_CC_OUT}" "${PROTO_H_OUT}"
+      COMMAND  ${CMAKE_COMMAND}
+        -E env "LD_LIBRARY_PATH=${PROTO_LIB_DIR}:$ENV{LD_LIBRARY_PATH}"
+        ${PROTOBUF_PROTOC_EXECUTABLE}
       ARGS --plugin $<TARGET_FILE:protoc-gen-krpc>
            --plugin $<TARGET_FILE:protoc-gen-insertions>
            --cpp_out ${ARG_BINARY_ROOT}
