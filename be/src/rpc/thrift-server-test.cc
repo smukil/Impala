@@ -21,7 +21,6 @@
 #include "rpc/thrift-client.h"
 #include "service/fe-support.h"
 #include "service/impala-server.h"
-#include "gen-cpp/StatestoreService.h"
 #include "gutil/strings/substitute.h"
 
 #include "common/names.h"
