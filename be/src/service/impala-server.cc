@@ -48,7 +48,6 @@
 #include "rpc/thrift-util.h"
 #include "rpc/thrift-thread.h"
 #include "rpc/rpc-trace.h"
-#include "runtime/client-cache.h"
 #include "runtime/data-stream-mgr.h"
 #include "runtime/exec-env.h"
 #include "runtime/lib-cache.h"

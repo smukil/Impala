@@ -22,7 +22,6 @@
 #include <boost/thread/mutex.hpp>
 
 #include "common/status.h"
-#include "runtime/client-cache.h"
 #include "runtime/plan-fragment-executor.h"
 #include "service/fragment-mgr.h"
 

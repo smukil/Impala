@@ -23,7 +23,6 @@
 #include "gutil/strings/substitute.h"
 #include "kudu/util/net/net_util.h"
 
-#include "runtime/client-cache.h"
 #include "runtime/exec-env.h"
 #include "runtime/mem-tracker.h"
 #include "runtime/runtime-filter.inline.h"
