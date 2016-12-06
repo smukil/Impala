@@ -290,6 +290,7 @@ Status ExecEnv::StartServices() {
   }
 
   rpc_mgr_->Start(FLAGS_be_port);
+  rpc_mgr_->RegisterWebpages(webserver_.get());
 
   metrics_->Init(enable_webserver_ ? webserver_.get() : NULL);
   impalad_client_cache_->InitMetrics(metrics_.get(), "impala-server.backends");

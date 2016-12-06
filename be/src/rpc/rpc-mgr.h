@@ -36,6 +36,8 @@ class ResultTracker;
 
 namespace impala {
 
+class Webserver;
+
 class RpcMgr {
  public:
   Status Start(int32_t port);
@@ -57,6 +59,8 @@ class RpcMgr {
     proxy->reset(new P(messenger_, addresses[0]));
     return Status::OK();
   }
+
+  void RegisterWebpages(Webserver* webserver);
 
  private:
   Status RegisterServiceImpl(const std::string& name, kudu::rpc::ServiceIf* service);

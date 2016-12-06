@@ -22,15 +22,20 @@
 #include "kudu/rpc/acceptor_pool.h"
 #include "kudu/rpc/rpc_controller.h"
 #include "kudu/rpc/service_pool.h"
+#include "kudu/rpc/rpc_introspection.pb.h"
 
 #include "common/names.h"
 #include "service/prototest.service.h"
+#include "util/webserver.h"
+
+#include "rapidjson/document.h"
 
 #include "kudu/util/net/net_util.h"
 
 #include "service/impala-internal-service.h"
 
 using namespace impala;
+using rapidjson::Document;
 
 using kudu::rpc::MessengerBuilder;
 using kudu::rpc::Messenger;
@@ -72,4 +77,35 @@ Status RpcMgr::Start(int32_t port) {
   messenger_->AddAcceptorPool(addresses[0], &acceptor_pool);
   acceptor_pool->Start(2);
   return Status::OK();
+}
+
+
+void RpcMgr::RegisterWebpages(Webserver* webserver) {
+
+  auto callback = [this](const Webserver::ArgumentMap& args, Document* doc) {
+    using kudu::rpc::DumpRunningRpcsRequestPB;
+    using kudu::rpc::DumpRunningRpcsResponsePB;
+
+    DumpRunningRpcsResponsePB response;
+    this->messenger_->DumpRunningRpcs(DumpRunningRpcsRequestPB(), &response);
+    int32_t num_inbound_calls_in_flight = 0;
+    int32_t num_outbound_calls_in_flight = 0;
+    for (const auto& cnxn: response.inbound_connections()) {
+      num_inbound_calls_in_flight += cnxn.calls_in_flight().size();
+    }
+    for (const auto& cnxn: response.outbound_connections()) {
+      num_outbound_calls_in_flight += cnxn.calls_in_flight().size();
+    }
+
+    doc->AddMember("num_outbound_calls_in_flight", num_outbound_calls_in_flight,
+        doc->GetAllocator());
+    doc->AddMember("num_inbound_calls_in_flight", num_inbound_calls_in_flight,
+        doc->GetAllocator());
+    doc->AddMember("num_outbound_cnxns", response.outbound_connections().size(),
+        doc->GetAllocator());
+    doc->AddMember("num_inbound_cnxns", response.outbound_connections().size(),
+        doc->GetAllocator());
+  };
+
+  webserver->RegisterUrlCallback("/krpc", "krpc.tmpl", callback);
 }
