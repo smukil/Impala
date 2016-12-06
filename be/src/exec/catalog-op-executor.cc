@@ -19,25 +19,33 @@
 
 #include <sstream>
 
-#include "exec/incr-stats-util.h"
 #include "common/status.h"
-#include "runtime/lib-cache.h"
-#include "service/impala-server.h"
-#include "service/hs2-util.h"
-#include "util/string-parser.h"
-#include "util/runtime-profile-counters.h"
-#include "gen-cpp/CatalogService.h"
-#include "gen-cpp/CatalogService_types.h"
+#include "exec/incr-stats-util.h"
+#include "exec/kudu-util.h"
 #include "gen-cpp/CatalogObjects_types.h"
+#include "gen-cpp/CatalogService_types.h"
+#include "runtime/lib-cache.h"
+#include "service/hs2-util.h"
+#include "service/impala-server.h"
+#include "service/prototest.pb.h"
+#include "service/prototest.proxy.h"
+#include "util/runtime-profile-counters.h"
+#include "util/string-parser.h"
 
-#include <thrift/protocol/TDebugProtocol.h>
 #include <thrift/Thrift.h>
 #include <gutil/strings/substitute.h>
 
 #include "common/names.h"
 using namespace impala;
 using namespace apache::hive::service::cli::thrift;
-using namespace apache::thrift;
+
+// TODO(KRPC): Remove
+using namespace kudu::rpc_test;
+
+using kudu::rpc::RpcController;
+
+using kudu::rpc_test::SentryAdminCheckRequestPB;
+using kudu::rpc_test::SentryAdminCheckResponsePB;
 
 DECLARE_int32(catalog_service_port);
 DECLARE_string(catalog_service_host);
@@ -49,16 +57,23 @@ Status CatalogOpExecutor::Exec(const TCatalogOpRequest& request) {
   SCOPED_TIMER(exec_timer);
   const TNetworkAddress& address =
       MakeNetworkAddress(FLAGS_catalog_service_host, FLAGS_catalog_service_port);
-  CatalogServiceConnection client(env_->catalogd_client_cache(), address, &status);
-  RETURN_IF_ERROR(status);
+  unique_ptr<CatalogServiceProxy> proxy;
+  RETURN_IF_ERROR(ExecEnv::GetInstance()->rpc_mgr()->GetProxy(address, &proxy));
+
   switch (request.op_type) {
     case TCatalogOpType::DDL: {
       // Compute stats stmts must be executed via ExecComputeStats().
       DCHECK(request.ddl_params.ddl_type != TDdlType::COMPUTE_STATS);
 
       exec_response_.reset(new TDdlExecResponse());
-      RETURN_IF_ERROR(client.DoRpc(&CatalogServiceClient::ExecDdl, request.ddl_params,
-          exec_response_.get()));
+      ExecDdlRequestPB request_pb;
+      ExecDdlResponsePB response_pb;
+      RETURN_IF_ERROR(
+          SerializeThriftToProtoWrapper(&request.ddl_params, true, &request_pb));
+      RpcController controller;
+      proxy->ExecDdl(request_pb, &response_pb, &controller);
+      DeserializeThriftFromProtoWrapper(response_pb, true, exec_response_.get());
+
       catalog_update_result_.reset(
           new TCatalogUpdateResult(exec_response_.get()->result));
       Status status(exec_response_->result.status);
@@ -73,8 +88,13 @@ Status CatalogOpExecutor::Exec(const TCatalogOpRequest& request) {
     }
     case TCatalogOpType::RESET_METADATA: {
       TResetMetadataResponse response;
-      RETURN_IF_ERROR(client.DoRpc(&CatalogServiceClient::ResetMetadata,
-          request.reset_metadata_params, &response));
+      ResetMetadataRequestPB request_pb;
+      ResetMetadataResponsePB response_pb;
+      RETURN_IF_ERROR(SerializeThriftToProtoWrapper(
+          &request.reset_metadata_params, true, &request_pb));
+      RpcController controller;
+      proxy->ResetMetadata(request_pb, &response_pb, &controller);
+      DeserializeThriftFromProtoWrapper(response_pb, true, &response);
       catalog_update_result_.reset(new TCatalogUpdateResult(response.result));
       return Status(response.result.status);
     }
@@ -249,16 +269,20 @@ Status CatalogOpExecutor::GetCatalogObject(const TCatalogObject& object_desc,
     TCatalogObject* result) {
   const TNetworkAddress& address =
       MakeNetworkAddress(FLAGS_catalog_service_host, FLAGS_catalog_service_port);
-  Status status;
-  CatalogServiceConnection client(env_->catalogd_client_cache(), address, &status);
-  RETURN_IF_ERROR(status);
+  unique_ptr<CatalogServiceProxy> proxy;
+  RETURN_IF_ERROR(ExecEnv::GetInstance()->rpc_mgr()->GetProxy(address, &proxy));
+
+  GetCatalogObjectRequestPB request_pb;
+  GetCatalogObjectResponsePB response_pb;
 
   TGetCatalogObjectRequest request;
   request.__set_object_desc(object_desc);
+  RETURN_IF_ERROR(SerializeThriftToProtoWrapper(&request, true, &request_pb));
 
   TGetCatalogObjectResponse response;
-  RETURN_IF_ERROR(
-      client.DoRpc(&CatalogServiceClient::GetCatalogObject, request, &response));
+  RpcController controller;
+  proxy->GetCatalogObject(request_pb, &response_pb, &controller);
+  DeserializeThriftFromProtoWrapper(response_pb, true, &response);
   *result = response.catalog_object;
   return Status::OK();
 }
@@ -267,20 +291,36 @@ Status CatalogOpExecutor::PrioritizeLoad(const TPrioritizeLoadRequest& req,
     TPrioritizeLoadResponse* result) {
   const TNetworkAddress& address =
       MakeNetworkAddress(FLAGS_catalog_service_host, FLAGS_catalog_service_port);
-  Status status;
-  CatalogServiceConnection client(env_->catalogd_client_cache(), address, &status);
-  RETURN_IF_ERROR(status);
-  RETURN_IF_ERROR(client.DoRpc(&CatalogServiceClient::PrioritizeLoad, req, result));
+  unique_ptr<CatalogServiceProxy> proxy;
+  RETURN_IF_ERROR(ExecEnv::GetInstance()->rpc_mgr()->GetProxy(address, &proxy));
+
+  PrioritizeLoadRequestPB request_pb;
+  PrioritizeLoadResponsePB response_pb;
+  RETURN_IF_ERROR(SerializeThriftToProtoWrapper(&req, true, &request_pb));
+  RpcController controller;
+  proxy->PrioritizeLoad(request_pb, &response_pb, &controller);
+  RETURN_IF_ERROR(FromKuduStatus(controller.status()));
+
+  DeserializeThriftFromProtoWrapper(response_pb, true, result);
+
   return Status::OK();
 }
 
 Status CatalogOpExecutor::SentryAdminCheck(const TSentryAdminCheckRequest& req) {
   const TNetworkAddress& address =
       MakeNetworkAddress(FLAGS_catalog_service_host, FLAGS_catalog_service_port);
-  Status cnxn_status;
-  CatalogServiceConnection client(env_->catalogd_client_cache(), address, &cnxn_status);
-  RETURN_IF_ERROR(cnxn_status);
+  unique_ptr<CatalogServiceProxy> proxy;
+  RETURN_IF_ERROR(ExecEnv::GetInstance()->rpc_mgr()->GetProxy(address, &proxy));
+
+  SentryAdminCheckRequestPB request_pb;
+  SentryAdminCheckResponsePB response_pb;
+  RETURN_IF_ERROR(SerializeThriftToProtoWrapper(&req, true, &request_pb));
+  RpcController controller;
+  proxy->SentryAdminCheck(request_pb, &response_pb, &controller);
+  RETURN_IF_ERROR(FromKuduStatus(controller.status()));
+
   TSentryAdminCheckResponse resp;
-  RETURN_IF_ERROR(client.DoRpc(&CatalogServiceClient::SentryAdminCheck, req, &resp));
+  DeserializeThriftFromProtoWrapper(response_pb, true, &resp);
+
   return Status(resp.status);
 }

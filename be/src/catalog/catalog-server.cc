@@ -27,6 +27,9 @@
 #include "gen-cpp/CatalogObjects_types.h"
 #include "gen-cpp/CatalogService_types.h"
 
+#include "service/prototest.pb.h"
+#include "service/prototest.service.h"
+
 #include "common/names.h"
 
 using boost::bind;
@@ -53,95 +56,145 @@ const string CATALOG_TEMPLATE = "catalog.tmpl";
 const string CATALOG_OBJECT_WEB_PAGE = "/catalog_object";
 const string CATALOG_OBJECT_TEMPLATE = "catalog_object.tmpl";
 
-// Implementation for the CatalogService thrift interface.
-class CatalogServiceThriftIf : public CatalogServiceIf {
+// TODO(HNR): REMOVE ME!
+using namespace kudu::rpc_test;
+
+using kudu::rpc_test::ExecDdlRequestPB;
+using kudu::rpc_test::ExecDdlResponsePB;
+
+using kudu::rpc::RpcContext;
+
+class CatalogServiceImpl : public kudu::rpc_test::CatalogServiceIf {
  public:
-  CatalogServiceThriftIf(CatalogServer* catalog_server)
-      : catalog_server_(catalog_server) {
+  CatalogServiceImpl(const scoped_refptr<kudu::MetricEntity>& entity,
+      const scoped_refptr<kudu::rpc::ResultTracker> tracker)
+    : CatalogServiceIf(entity, tracker) {}
+
+  void set_catalog_server(CatalogServer* catalog_server) {
+    catalog_server_ = catalog_server;
   }
 
-  // Executes a TDdlExecRequest and returns details on the result of the operation.
-  virtual void ExecDdl(TDdlExecResponse& resp, const TDdlExecRequest& req) {
-    VLOG_RPC << "ExecDdl(): request=" << ThriftDebugString(req);
-    Status status = catalog_server_->catalog()->ExecDdl(req, &resp);
-    if (!status.ok()) LOG(ERROR) << status.GetDetail();
-    TStatus thrift_status;
-    status.ToThrift(&thrift_status);
-    resp.result.__set_status(thrift_status);
-    VLOG_RPC << "ExecDdl(): response=" << ThriftDebugString(resp);
+  template <typename PBREQ, typename PBRESP, typename THRIFTREQ, typename THRIFTRESP,
+      typename RPC>
+  void ExecRpc(const RPC& rpc, const PBREQ* request, PBRESP* response) {
+    THRIFTREQ thrift_request;
+    Status status = DeserializeThriftFromProtoWrapper(*request, true, &thrift_request);
+    THRIFTRESP thrift_response;
+    if (status.ok()) {
+      status = rpc(thrift_request, &thrift_response);
+      if (!status.ok()) LOG(ERROR) << status.GetDetail();
+    }
+    status.ToThrift(&thrift_response.status);
+    SerializeThriftToProtoWrapper(&thrift_response, true, response);
   }
 
-  // Executes a TResetMetadataRequest and returns details on the result of the operation.
-  virtual void ResetMetadata(TResetMetadataResponse& resp,
-      const TResetMetadataRequest& req) {
-    VLOG_RPC << "ResetMetadata(): request=" << ThriftDebugString(req);
-    Status status = catalog_server_->catalog()->ResetMetadata(req, &resp);
-    if (!status.ok()) LOG(ERROR) << status.GetDetail();
-    TStatus thrift_status;
-    status.ToThrift(&thrift_status);
-    resp.result.__set_status(thrift_status);
-    VLOG_RPC << "ResetMetadata(): response=" << ThriftDebugString(resp);
+  template <typename PBREQ, typename PBRESP, typename THRIFTREQ, typename THRIFTRESP,
+      typename RPC>
+  void ExecRpcNoStatus(const RPC& rpc, const PBREQ* request, PBRESP* response) {
+    THRIFTREQ thrift_request;
+    Status status = DeserializeThriftFromProtoWrapper(*request, true, &thrift_request);
+    THRIFTRESP thrift_response;
+    if (status.ok()) {
+      status = rpc(thrift_request, &thrift_response);
+      if (!status.ok()) LOG(ERROR) << status.GetDetail();
+    }
+    SerializeThriftToProtoWrapper(&thrift_response, true, response);
   }
 
-  // Executes a TUpdateCatalogRequest and returns details on the result of the
-  // operation.
-  virtual void UpdateCatalog(TUpdateCatalogResponse& resp,
-      const TUpdateCatalogRequest& req) {
-    VLOG_RPC << "UpdateCatalog(): request=" << ThriftDebugString(req);
-    Status status = catalog_server_->catalog()->UpdateCatalog(req, &resp);
-    if (!status.ok()) LOG(ERROR) << status.GetDetail();
-    TStatus thrift_status;
-    status.ToThrift(&thrift_status);
-    resp.result.__set_status(thrift_status);
-    VLOG_RPC << "UpdateCatalog(): response=" << ThriftDebugString(resp);
+  virtual void ExecDdl(
+      const ExecDdlRequestPB* request, ExecDdlResponsePB* response, RpcContext* context) {
+    auto rpc = [svr = catalog_server_](
+                   const TDdlExecRequest& request, TDdlExecResponse* response)
+                   ->Status {
+      return svr->catalog()->ExecDdl(request, response);
+    };
+
+    ExecRpcNoStatus<ExecDdlRequestPB, ExecDdlResponsePB, TDdlExecRequest,
+        TDdlExecResponse, decltype(rpc)>(rpc, request, response);
+    context->RespondSuccess();
   }
 
-  // Gets functions in the Catalog based on the parameters of the
-  // TGetFunctionsRequest.
-  virtual void GetFunctions(TGetFunctionsResponse& resp,
-      const TGetFunctionsRequest& req) {
-    VLOG_RPC << "GetFunctions(): request=" << ThriftDebugString(req);
-    Status status = catalog_server_->catalog()->GetFunctions(req, &resp);
-    if (!status.ok()) LOG(ERROR) << status.GetDetail();
-    TStatus thrift_status;
-    status.ToThrift(&thrift_status);
-    resp.__set_status(thrift_status);
-    VLOG_RPC << "GetFunctions(): response=" << ThriftDebugString(resp);
+  virtual void GetCatalogObject(const GetCatalogObjectRequestPB* request,
+      GetCatalogObjectResponsePB* response, RpcContext* context) {
+    auto rpc = [svr = catalog_server_](const TGetCatalogObjectRequest& request,
+                   TGetCatalogObjectResponse* response)
+                   ->Status {
+      return svr->catalog()->GetCatalogObject(
+          request.object_desc, &response->catalog_object);
+    };
+
+    ExecRpcNoStatus<GetCatalogObjectRequestPB, GetCatalogObjectResponsePB,
+        TGetCatalogObjectRequest, TGetCatalogObjectResponse, decltype(rpc)>(
+        rpc, request, response);
+    context->RespondSuccess();
   }
 
-  // Gets a TCatalogObject based on the parameters of the TGetCatalogObjectRequest.
-  virtual void GetCatalogObject(TGetCatalogObjectResponse& resp,
-      const TGetCatalogObjectRequest& req) {
-    VLOG_RPC << "GetCatalogObject(): request=" << ThriftDebugString(req);
-    Status status = catalog_server_->catalog()->GetCatalogObject(req.object_desc,
-        &resp.catalog_object);
-    if (!status.ok()) LOG(ERROR) << status.GetDetail();
-    VLOG_RPC << "GetCatalogObject(): response=" << ThriftDebugString(resp);
+  virtual void ResetMetadata(const ResetMetadataRequestPB* request,
+      ResetMetadataResponsePB* response, RpcContext* context) {
+    auto rpc = [svr = catalog_server_](
+                   const TResetMetadataRequest& request, TResetMetadataResponse* response)
+                   ->Status {
+      return svr->catalog()->ResetMetadata(request, response);
+    };
+
+    ExecRpcNoStatus<ResetMetadataRequestPB, ResetMetadataResponsePB,
+        TResetMetadataRequest, TResetMetadataResponse, decltype(rpc)>(
+        rpc, request, response);
+    context->RespondSuccess();
   }
 
-  // Prioritizes the loading of metadata for one or more catalog objects. Currently only
-  // used for loading tables/views because they are the only type of object that is loaded
-  // lazily.
-  virtual void PrioritizeLoad(TPrioritizeLoadResponse& resp,
-      const TPrioritizeLoadRequest& req) {
-    VLOG_RPC << "PrioritizeLoad(): request=" << ThriftDebugString(req);
-    Status status = catalog_server_->catalog()->PrioritizeLoad(req);
-    if (!status.ok()) LOG(ERROR) << status.GetDetail();
-    TStatus thrift_status;
-    status.ToThrift(&thrift_status);
-    resp.__set_status(thrift_status);
-    VLOG_RPC << "PrioritizeLoad(): response=" << ThriftDebugString(resp);
+  virtual void UpdateCatalog(const UpdateCatalogRequestPB* request,
+      UpdateCatalogResponsePB* response, RpcContext* context) {
+    auto rpc = [svr = catalog_server_](
+                   const TUpdateCatalogRequest& request, TUpdateCatalogResponse* response)
+                   ->Status {
+      return svr->catalog()->UpdateCatalog(request, response);
+    };
+
+    ExecRpcNoStatus<UpdateCatalogRequestPB, UpdateCatalogResponsePB,
+        TUpdateCatalogRequest, TUpdateCatalogResponse, decltype(rpc)>(
+        rpc, request, response);
+    context->RespondSuccess();
   }
 
-  virtual void SentryAdminCheck(TSentryAdminCheckResponse& resp,
-      const TSentryAdminCheckRequest& req) {
-    VLOG_RPC << "SentryAdminCheck(): request=" << ThriftDebugString(req);
-    Status status = catalog_server_->catalog()->SentryAdminCheck(req);
-    if (!status.ok()) LOG(ERROR) << status.GetDetail();
-    TStatus thrift_status;
-    status.ToThrift(&thrift_status);
-    resp.__set_status(thrift_status);
-    VLOG_RPC << "SentryAdminCheck(): response=" << ThriftDebugString(resp);
+  virtual void GetFunctions(const GetFunctionsRequestPB* request,
+      GetFunctionsResponsePB* response, RpcContext* context) {
+    auto rpc = [svr = catalog_server_](
+                   const TGetFunctionsRequest& request, TGetFunctionsResponse* response)
+                   ->Status {
+      return svr->catalog()->GetFunctions(request, response);
+    };
+
+    ExecRpc<GetFunctionsRequestPB, GetFunctionsResponsePB, TGetFunctionsRequest,
+        TGetFunctionsResponse, decltype(rpc)>(rpc, request, response);
+    context->RespondSuccess();
+  }
+
+  virtual void PrioritizeLoad(const PrioritizeLoadRequestPB* request,
+      PrioritizeLoadResponsePB* response, RpcContext* context) {
+    auto rpc = [svr = catalog_server_](const TPrioritizeLoadRequest& request,
+                   TPrioritizeLoadResponse* response)
+                   ->Status {
+      return svr->catalog()->PrioritizeLoad(request);
+    };
+
+    ExecRpc<PrioritizeLoadRequestPB, PrioritizeLoadResponsePB, TPrioritizeLoadRequest,
+        TPrioritizeLoadResponse, decltype(rpc)>(rpc, request, response);
+    context->RespondSuccess();
+  }
+
+  virtual void SentryAdminCheck(const SentryAdminCheckRequestPB* request,
+      SentryAdminCheckResponsePB* response, RpcContext* context) {
+    auto rpc = [svr = catalog_server_](const TSentryAdminCheckRequest& request,
+                   TSentryAdminCheckResponse* response)
+                   ->Status {
+      return svr->catalog()->SentryAdminCheck(request);
+    };
+
+    ExecRpc<SentryAdminCheckRequestPB, SentryAdminCheckResponsePB,
+        TSentryAdminCheckRequest, TSentryAdminCheckResponse, decltype(rpc)>(
+        rpc, request, response);
+    context->RespondSuccess();
   }
 
  private:
@@ -149,10 +202,12 @@ class CatalogServiceThriftIf : public CatalogServiceIf {
 };
 
 CatalogServer::CatalogServer(MetricGroup* metrics)
-  : thrift_iface_(new CatalogServiceThriftIf(this)),
-    thrift_serializer_(FLAGS_compact_catalog_topic), metrics_(metrics),
-    topic_updates_ready_(false), last_sent_catalog_version_(0L),
-    catalog_objects_min_version_(0L), catalog_objects_max_version_(0L) {
+  : thrift_serializer_(FLAGS_compact_catalog_topic),
+    metrics_(metrics),
+    topic_updates_ready_(false),
+    last_sent_catalog_version_(0L),
+    catalog_objects_min_version_(0L),
+    catalog_objects_max_version_(0L) {
   topic_processing_time_metric_ = StatsMetric<double>::CreateAndRegister(metrics,
       CATALOG_SERVER_TOPIC_PROCESSING_TIMES);
   rpc_mgr_.reset(new RpcMgr());
@@ -160,7 +215,7 @@ CatalogServer::CatalogServer(MetricGroup* metrics)
 
 Status CatalogServer::Start() {
   TNetworkAddress subscriber_address =
-      MakeNetworkAddress(FLAGS_hostname, FLAGS_state_store_subscriber_port);
+      MakeNetworkAddress(FLAGS_hostname, FLAGS_catalog_service_port);
   TNetworkAddress statestore_address =
       MakeNetworkAddress(FLAGS_state_store_host, FLAGS_state_store_port);
   TNetworkAddress server_address = MakeNetworkAddress(FLAGS_hostname,
@@ -172,7 +227,10 @@ Status CatalogServer::Start() {
       "catalog-update-gathering-thread",
       &CatalogServer::GatherCatalogUpdatesThread, this));
 
-  rpc_mgr_->Start(FLAGS_state_store_subscriber_port);
+  rpc_mgr_->Start(FLAGS_catalog_service_port);
+  CatalogServiceImpl* impl;
+  rpc_mgr_->RegisterService<CatalogServiceImpl>(&impl);
+  impl->set_catalog_server(this);
 
   statestore_subscriber_.reset(new StatestoreSubscriber(
      Substitute("catalog-server@$0", TNetworkAddressToString(server_address)),

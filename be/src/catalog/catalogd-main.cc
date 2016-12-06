@@ -79,22 +79,17 @@ int CatalogdMain(int argc, char** argv) {
   CatalogServer catalog_server(metrics.get());
   ABORT_IF_ERROR(catalog_server.Start());
   catalog_server.RegisterWebpages(webserver.get());
-  boost::shared_ptr<TProcessor> processor(
-      new CatalogServiceProcessor(catalog_server.thrift_iface()));
-  boost::shared_ptr<TProcessorEventHandler> event_handler(
-      new RpcEventHandler("catalog-server", metrics.get()));
-  processor->setEventHandler(event_handler);
-
-  ThriftServer* server = new ThriftServer("CatalogService", processor,
-      FLAGS_catalog_service_port, NULL, metrics.get(), 5);
-  if (EnableInternalSslConnections()) {
-    LOG(INFO) << "Enabling SSL for CatalogService";
-    ABORT_IF_ERROR(server->EnableSsl(FLAGS_ssl_server_certificate, FLAGS_ssl_private_key,
-        FLAGS_ssl_private_key_password_cmd));
-  }
-  ABORT_IF_ERROR(server->Start());
+  // if (EnableInternalSslConnections()) {
+  //   LOG(INFO) << "Enabling SSL for CatalogService";
+  //   ABORT_IF_ERROR(server->EnableSsl(FLAGS_ssl_server_certificate,
+  //   FLAGS_ssl_private_key,
+  //       FLAGS_ssl_private_key_password_cmd));
+  // }
+  // ABORT_IF_ERROR(server->Start());
   LOG(INFO) << "CatalogService started on port: " << FLAGS_catalog_service_port;
-  server->Join();
+  // server->Join();
+
+  SleepForMs(1000000);
 
   return 0;
 }

@@ -192,3 +192,93 @@ service StatestoreService {
   // topics may be added.
   rpc RegisterSubscriber(RegisterSubscriberRequestPB) returns (RegisterSubscriberResponsePB);
 }
+
+//////////////////////////////////////////////////////////////////////////////////////////
+
+message ExecDdlRequestPB {
+  required bytes thrift_struct = 1;
+}
+
+message ExecDdlResponsePB {
+  required bytes thrift_struct = 1;
+}
+
+message GetCatalogObjectRequestPB {
+  required bytes thrift_struct = 1;
+}
+
+message GetCatalogObjectResponsePB {
+  required bytes thrift_struct = 1;
+}
+
+message ResetMetadataRequestPB {
+  required bytes thrift_struct = 1;
+}
+
+message ResetMetadataResponsePB {
+  required bytes thrift_struct = 1;
+}
+
+message UpdateCatalogRequestPB {
+  required bytes thrift_struct = 1;
+}
+
+message UpdateCatalogResponsePB {
+  required bytes thrift_struct = 1;
+}
+
+message GetFunctionsRequestPB {
+  required bytes thrift_struct = 1;
+}
+
+message GetFunctionsResponsePB {
+  required bytes thrift_struct = 1;
+}
+
+message PrioritizeLoadRequestPB {
+  required bytes thrift_struct = 1;
+}
+
+message PrioritizeLoadResponsePB {
+  required bytes thrift_struct = 1;
+}
+
+message SentryAdminCheckRequestPB {
+  required bytes thrift_struct = 1;
+}
+
+message SentryAdminCheckResponsePB {
+  required bytes thrift_struct = 1;
+}
+
+
+service CatalogService {
+  // Executes a DDL request and returns details on the result of the operation.
+  rpc ExecDdl(ExecDdlRequestPB) returns (ExecDdlResponsePB);
+
+  // Gets the catalog object corresponding to the given request.
+  rpc GetCatalogObject(GetCatalogObjectRequestPB) returns (GetCatalogObjectResponsePB);
+
+  // Resets the Catalog metadata. Used to explicitly trigger reloading of the Hive
+  // Metastore metadata and/or HDFS block location metadata.
+  rpc ResetMetadata(ResetMetadataRequestPB) returns (ResetMetadataResponsePB);
+
+  // Updates the metastore with new partition information and returns a response
+  // with details on the result of the operation.
+  rpc UpdateCatalog(UpdateCatalogRequestPB) returns (UpdateCatalogResponsePB);
+
+  // Gets all user defined functions (aggregate and scalar) in the catalog matching
+  // the parameters of TGetFunctionsRequest.
+  rpc GetFunctions(GetFunctionsRequestPB) returns (GetFunctionsResponsePB);
+
+  // Prioritize the loading of metadata for the CatalogObjects specified in the
+  // TPrioritizeLoadRequest.
+  rpc PrioritizeLoad(PrioritizeLoadRequestPB) returns (PrioritizeLoadResponsePB);
+
+  // Performs a check with the Sentry Service to determine if the requesting user
+  // is configured as an admin on the Sentry Service. This API may be removed in
+  // the future and external clients should not rely on using it.
+  // TODO: When Sentry Service has a better mechanism to perform these changes this API
+  // should be deprecated.
+  rpc SentryAdminCheck(SentryAdminCheckRequestPB) returns (SentryAdminCheckResponsePB);
+}

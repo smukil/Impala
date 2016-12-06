@@ -25,7 +25,6 @@
 
 // NOTE: try not to add more headers here: runtime-state.h is included in many many files.
 #include "common/global-types.h"  // for PlanNodeId
-#include "runtime/client-cache-types.h"
 #include "runtime/exec-env.h"
 #include "runtime/thread-resource-mgr.h"
 #include "util/auth-util.h" // for GetEffectiveUser()
@@ -126,9 +125,6 @@ class RuntimeState {
   ExecEnv* exec_env() { return exec_env_; }
   DataStreamMgr* stream_mgr() { return exec_env_->stream_mgr(); }
   HBaseTableFactory* htable_factory() { return exec_env_->htable_factory(); }
-  CatalogServiceClientCache* catalogd_client_cache() {
-    return exec_env_->catalogd_client_cache();
-  }
   DiskIoMgr* io_mgr() { return exec_env_->disk_io_mgr(); }
   MemTracker* instance_mem_tracker() { return instance_mem_tracker_.get(); }
   MemTracker* query_mem_tracker() { return query_mem_tracker_.get(); }

@@ -272,35 +272,3 @@ struct TSentryAdminCheckResponse {
   // or if the Sentry Service is unavailable. Returns OK if the operation was successful.
   1: optional Status.TStatus status
 }
-
-// The CatalogService API
-service CatalogService {
-  // Executes a DDL request and returns details on the result of the operation.
-  TDdlExecResponse ExecDdl(1: TDdlExecRequest req);
-
-  // Gets the catalog object corresponding to the given request.
-  TGetCatalogObjectResponse GetCatalogObject(1: TGetCatalogObjectRequest req);
-
-  // Resets the Catalog metadata. Used to explicitly trigger reloading of the Hive
-  // Metastore metadata and/or HDFS block location metadata.
-  TResetMetadataResponse ResetMetadata(1: TResetMetadataRequest req);
-
-  // Updates the metastore with new partition information and returns a response
-  // with details on the result of the operation.
-  TUpdateCatalogResponse UpdateCatalog(1: TUpdateCatalogRequest req);
-
-  // Gets all user defined functions (aggregate and scalar) in the catalog matching
-  // the parameters of TGetFunctionsRequest.
-  TGetFunctionsResponse GetFunctions(1: TGetFunctionsRequest req);
-
-  // Prioritize the loading of metadata for the CatalogObjects specified in the
-  // TPrioritizeLoadRequest.
-  TPrioritizeLoadResponse PrioritizeLoad(1: TPrioritizeLoadRequest req);
-
-  // Performs a check with the Sentry Service to determine if the requesting user
-  // is configured as an admin on the Sentry Service. This API may be removed in
-  // the future and external clients should not rely on using it.
-  // TODO: When Sentry Service has a better mechanism to perform these changes this API
-  // should be deprecated.
-  TSentryAdminCheckResponse SentryAdminCheck(1: TSentryAdminCheckRequest req);
-}
