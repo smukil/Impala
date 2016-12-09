@@ -28,8 +28,6 @@
 #include <boost/unordered_map.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 
-#include "gen-cpp/StatestoreService.h"
-#include "gen-cpp/StatestoreSubscriber.h"
 #include "gen-cpp/Types_types.h"
 #include "rpc/rpc-mgr.h"
 #include "runtime/timestamp-value.h"

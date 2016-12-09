@@ -24,7 +24,6 @@
 #include <gutil/strings/substitute.h>
 
 #include "common/logging.h"
-#include "gen-cpp/CatalogService.h"
 #include "runtime/coordinator.h"
 #include "runtime/data-stream-mgr.h"
 #include "runtime/disk-io-mgr.h"

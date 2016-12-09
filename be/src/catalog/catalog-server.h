@@ -24,7 +24,6 @@
 #include <boost/thread/mutex.hpp>
 #include <boost/unordered_set.hpp>
 
-#include "gen-cpp/CatalogService.h"
 #include "gen-cpp/Frontend_types.h"
 #include "gen-cpp/Types_types.h"
 #include "catalog/catalog.h"

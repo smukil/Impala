@@ -122,33 +122,6 @@ class StatestoreSubscriberImpl : public kudu::rpc_test::StatestoreSubscriberIf {
 
 };
 
-// Proxy class for the subscriber heartbeat thrift API, which
-// translates RPCs into method calls on the local subscriber object.
-class StatestoreSubscriberThriftIf : public StatestoreSubscriberIf {
- public:
-  StatestoreSubscriberThriftIf(StatestoreSubscriber* subscriber)
-      : subscriber_(subscriber) { DCHECK(subscriber != NULL); }
-  virtual void UpdateState(TUpdateStateResponse& response,
-                           const TUpdateStateRequest& params) {
-    TUniqueId registration_id;
-    if (params.__isset.registration_id) {
-      registration_id = params.registration_id;
-    }
-
-    subscriber_->UpdateState(params.topic_deltas, registration_id,
-        &response.topic_updates, &response.skipped).ToThrift(&response.status);
-    // Make sure Thrift thinks the field is set.
-    response.__set_skipped(response.skipped);
-  }
-
-  virtual void Heartbeat(THeartbeatResponse& response, const THeartbeatRequest& request) {
-    subscriber_->Heartbeat(request.registration_id);
-  }
-
- private:
-  StatestoreSubscriber* subscriber_;
-};
-
 StatestoreSubscriber::StatestoreSubscriber(const std::string& subscriber_id,
     const TNetworkAddress& heartbeat_address, const TNetworkAddress& statestore_address,
     RpcMgr* rpc_mgr, MetricGroup* metrics)

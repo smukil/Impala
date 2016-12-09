@@ -25,7 +25,6 @@ set(EXECUTABLE_OUTPUT_PATH "${BUILD_OUTPUT_ROOT_DIRECTORY}/thrift")
 set(SRC_FILES
   CatalogObjects_constants.cpp
   CatalogObjects_types.cpp
-  CatalogService.cpp
   CatalogService_constants.cpp
   CatalogService_types.cpp
   CatalogInternalService_constants.cpp

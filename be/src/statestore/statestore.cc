@@ -148,25 +148,6 @@ class StatestoreServiceImpl : public kudu::rpc_test::StatestoreServiceIf {
   Statestore* statestore_ = nullptr;
 };
 
-class StatestoreThriftIf : public StatestoreServiceIf {
- public:
-  StatestoreThriftIf(Statestore* statestore)
-      : statestore_(statestore) {
-    DCHECK(statestore_ != NULL);
-  }
-
-  virtual void RegisterSubscriber(TRegisterSubscriberResponse& response,
-      const TRegisterSubscriberRequest& params) {
-    TUniqueId registration_id;
-    Status status = statestore_->RegisterSubscriber(params.subscriber_id,
-        params.subscriber_location, params.topic_registrations, &registration_id);
-    status.ToThrift(&response.status);
-    response.__set_registration_id(registration_id);
-  }
- private:
-  Statestore* statestore_;
-};
-
 void Statestore::TopicEntry::SetValue(const Statestore::TopicEntry::Value& bytes,
     TopicEntry::Version version) {
   DCHECK(bytes == Statestore::TopicEntry::NULL_VALUE || bytes.size() > 0);

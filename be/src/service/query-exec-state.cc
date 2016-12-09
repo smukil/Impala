@@ -35,7 +35,6 @@
 #include "util/runtime-profile-counters.h"
 #include "util/time.h"
 
-#include "gen-cpp/CatalogService.h"
 #include "gen-cpp/CatalogService_types.h"
 
 #include <thrift/Thrift.h>

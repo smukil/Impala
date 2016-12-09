@@ -30,8 +30,6 @@
 #include "rpc/thrift-util.h"
 #include "rpc/thrift-client.h"
 #include "util/metrics.h"
-#include "gen-cpp/StatestoreService.h"
-#include "gen-cpp/StatestoreSubscriber.h"
 
 namespace impala {
 
@@ -221,7 +219,6 @@ class StatestoreSubscriber {
   StringProperty* registration_id_metric_;
 
   /// Subscriber thrift implementation, needs to access UpdateState
-  friend class StatestoreSubscriberThriftIf;
   friend class StatestoreSubscriberImpl;
 
   /// Called when the statestore sends a topic update. Each registered callback is called
