@@ -27,6 +27,7 @@
 #include "rpc/rpc-mgr.h"
 #include "runtime/krpc-data-stream-mgr.h"
 #include "runtime/exec-env.h"
+#include "runtime/mem-tracker.h"
 #include "runtime/row-batch.h"
 #include "util/memory-metrics.h"
 #include "util/parse-util.h"
@@ -40,9 +41,9 @@ using kudu::rpc::RpcContext;
 using kudu::MonoDelta;
 using kudu::MonoTime;
 
-static const string queue_limit_msg = "(Advanced) Limit on RPC payloads consumption for "
+static const string QUEUE_LIMIT_MSG = "(Advanced) Limit on RPC payloads consumption for "
     "DataStreamService. " + Substitute(MEM_UNITS_HELP_MSG, "the process memory limit");
-DEFINE_string(datastream_service_queue_mem_limit, "5%", queue_limit_msg.c_str());
+DEFINE_string(datastream_service_queue_mem_limit, "5%", QUEUE_LIMIT_MSG.c_str());
 DEFINE_int32(datastream_service_num_svc_threads, 0, "Number of threads for processing "
     "datastream services' RPCs. If left at default value 0, it will be set to number of "
     "CPU cores");

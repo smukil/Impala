@@ -21,7 +21,6 @@
 #include "gen-cpp/data_stream_service.service.h"
 
 #include "common/status.h"
-#include "runtime/mem-tracker.h"
 
 namespace kudu {
 namespace rpc {
@@ -31,6 +30,8 @@ class RpcContext;
 
 namespace impala {
 
+class MemTracker;
+class MetricGroup;
 class RpcMgr;
 
 /// This is singleton class which provides data transmission services between fragment

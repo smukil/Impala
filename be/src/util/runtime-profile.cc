@@ -818,7 +818,7 @@ Status RuntimeProfile::SerializeToArchiveString(stringstream* out) const {
   const_cast<RuntimeProfile*>(this)->ToThrift(&thrift_object);
   ThriftSerializer serializer(true);
   vector<uint8_t> serialized_buffer;
-  RETURN_IF_ERROR(serializer.Serialize(&thrift_object, &serialized_buffer));
+  RETURN_IF_ERROR(serializer.SerializeToVector(&thrift_object, &serialized_buffer));
 
   // Compress the serialized thrift string.  This uses string keys and is very
   // easy to compress.

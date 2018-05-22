@@ -24,6 +24,10 @@
 #include <boost/unordered_map.hpp>
 #include <boost/functional/hash.hpp>
 
+#include <google/protobuf/map.h>
+#include <google/protobuf/map_entry.h>
+#include <google/protobuf/map_field_inl.h>
+
 #include "util/hash-util.h"
 #include "gen-cpp/Types_types.h"
 
@@ -126,11 +130,11 @@ const V& FindWithDefault(const boost::unordered_map<K, V>& m, const K& key,
 
 /// Merges (by summing) the values from two maps of values. The values must be
 /// native types or support operator +=.
-template<typename K, typename V>
-void MergeMapValues(const std::map<K, V>& src, std::map<K, V>* dst) {
-  for (typename std::map<K, V>::const_iterator src_it = src.begin();
+template<typename MAP_TYPE>
+void MergeMapValues(const MAP_TYPE& src, MAP_TYPE* dst) {
+  for (typename MAP_TYPE::const_iterator src_it = src.begin();
       src_it != src.end(); ++src_it) {
-    typename std::map<K, V>::iterator dst_it = dst->find(src_it->first);
+    typename MAP_TYPE::iterator dst_it = dst->find(src_it->first);
     if (dst_it == dst->end()) {
       (*dst)[src_it->first] = src_it->second;
     } else {
