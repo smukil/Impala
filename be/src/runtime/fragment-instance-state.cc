@@ -103,11 +103,11 @@ Status FragmentInstanceState::Exec() {
 done:
   if (!status.ok()) {
     if (!is_prepared) {
-      DCHECK_LE(current_state_.Load(), TFInstanceExecState::WAITING_FOR_PREPARE);
+      DCHECK_LE(current_state_.Load(), FInstanceExecStatePB::WAITING_FOR_PREPARE);
       // Tell the managing 'QueryState' that we hit an error during Prepare().
       query_state_->ErrorDuringPrepare(status, instance_id());
     } else {
-      DCHECK_GT(current_state_.Load(), TFInstanceExecState::WAITING_FOR_PREPARE);
+      DCHECK_GT(current_state_.Load(), FInstanceExecStatePB::WAITING_FOR_PREPARE);
       // Tell the managing 'QueryState' that we hit an error during execution.
       query_state_->ErrorDuringExecute(status, instance_id());
     }
@@ -127,7 +127,7 @@ void FragmentInstanceState::Cancel() {
 }
 
 Status FragmentInstanceState::Prepare() {
-  DCHECK_EQ(current_state_.Load(), TFInstanceExecState::WAITING_FOR_EXEC);
+  DCHECK_EQ(current_state_.Load(), FInstanceExecStatePB::WAITING_FOR_EXEC);
   VLOG(2) << "fragment_instance_ctx:\n" << ThriftDebugString(instance_ctx_);
 
   // Do not call RETURN_IF_ERROR or explicitly return before this line,
@@ -254,7 +254,7 @@ Status FragmentInstanceState::Prepare() {
 
 Status FragmentInstanceState::Open() {
   DCHECK(!opened_promise_.IsSet());
-  DCHECK_EQ(current_state_.Load(), TFInstanceExecState::WAITING_FOR_PREPARE);
+  DCHECK_EQ(current_state_.Load(), FInstanceExecStatePB::WAITING_FOR_PREPARE);
   SCOPED_TIMER(profile()->total_time_counter());
   SCOPED_TIMER(ADD_TIMER(timings_profile_, OPEN_TIMER_NAME));
   SCOPED_THREAD_COUNTER_MEASUREMENT(runtime_state_->total_thread_statistics());
@@ -293,7 +293,7 @@ Status FragmentInstanceState::Open() {
 }
 
 Status FragmentInstanceState::ExecInternal() {
-  DCHECK_EQ(current_state_.Load(), TFInstanceExecState::WAITING_FOR_OPEN);
+  DCHECK_EQ(current_state_.Load(), FInstanceExecStatePB::WAITING_FOR_OPEN);
   // Inject failure if debug actions are enabled.
   RETURN_IF_ERROR(DebugAction(query_state_->query_options(), "FIS_IN_EXEC_INTERNAL"));
 
@@ -408,62 +408,62 @@ void FragmentInstanceState::SendReport(bool done, const Status& status) {
 
 void FragmentInstanceState::UpdateState(const StateEvent event)
 {
-  TFInstanceExecState::type current_state = current_state_.Load();
-  TFInstanceExecState::type next_state = current_state;
+  FInstanceExecStatePB current_state = current_state_.Load();
+  FInstanceExecStatePB next_state = current_state;
   switch (event) {
     case StateEvent::PREPARE_START:
-      DCHECK_EQ(current_state, TFInstanceExecState::WAITING_FOR_EXEC);
-      next_state = TFInstanceExecState::WAITING_FOR_PREPARE;
+      DCHECK_EQ(current_state, FInstanceExecStatePB::WAITING_FOR_EXEC);
+      next_state = FInstanceExecStatePB::WAITING_FOR_PREPARE;
       break;
 
     case StateEvent::CODEGEN_START:
-      DCHECK_EQ(current_state, TFInstanceExecState::WAITING_FOR_PREPARE);
+      DCHECK_EQ(current_state, FInstanceExecStatePB::WAITING_FOR_PREPARE);
       event_sequence_->MarkEvent("Prepare Finished");
-      next_state = TFInstanceExecState::WAITING_FOR_CODEGEN;
+      next_state = FInstanceExecStatePB::WAITING_FOR_CODEGEN;
       break;
 
     case StateEvent::OPEN_START:
-      if (current_state == TFInstanceExecState::WAITING_FOR_PREPARE) {
+      if (current_state == FInstanceExecStatePB::WAITING_FOR_PREPARE) {
         event_sequence_->MarkEvent("Prepare Finished");
       } else {
-        DCHECK_EQ(current_state, TFInstanceExecState::WAITING_FOR_CODEGEN);
+        DCHECK_EQ(current_state, FInstanceExecStatePB::WAITING_FOR_CODEGEN);
       }
-      next_state = TFInstanceExecState::WAITING_FOR_OPEN;
+      next_state = FInstanceExecStatePB::WAITING_FOR_OPEN;
       break;
 
     case StateEvent::WAITING_FOR_FIRST_BATCH:
-      DCHECK_EQ(current_state, TFInstanceExecState::WAITING_FOR_OPEN);
+      DCHECK_EQ(current_state, FInstanceExecStatePB::WAITING_FOR_OPEN);
       event_sequence_->MarkEvent("Open Finished");
-      next_state = TFInstanceExecState::WAITING_FOR_FIRST_BATCH;
+      next_state = FInstanceExecStatePB::WAITING_FOR_FIRST_BATCH;
       break;
 
     case StateEvent::BATCH_PRODUCED:
-      if (UNLIKELY(current_state == TFInstanceExecState::WAITING_FOR_FIRST_BATCH)) {
+      if (UNLIKELY(current_state == FInstanceExecStatePB::WAITING_FOR_FIRST_BATCH)) {
         event_sequence_->MarkEvent("First Batch Produced");
-        next_state = TFInstanceExecState::FIRST_BATCH_PRODUCED;
+        next_state = FInstanceExecStatePB::FIRST_BATCH_PRODUCED;
       } else {
-        DCHECK_EQ(current_state, TFInstanceExecState::PRODUCING_DATA);
+        DCHECK_EQ(current_state, FInstanceExecStatePB::PRODUCING_DATA);
       }
       break;
 
     case StateEvent::BATCH_SENT:
-      if (UNLIKELY(current_state == TFInstanceExecState::FIRST_BATCH_PRODUCED)) {
+      if (UNLIKELY(current_state == FInstanceExecStatePB::FIRST_BATCH_PRODUCED)) {
         event_sequence_->MarkEvent("First Batch Sent");
-        next_state = TFInstanceExecState::PRODUCING_DATA;
+        next_state = FInstanceExecStatePB::PRODUCING_DATA;
       } else {
-        DCHECK_EQ(current_state, TFInstanceExecState::PRODUCING_DATA);
+        DCHECK_EQ(current_state, FInstanceExecStatePB::PRODUCING_DATA);
       }
       break;
 
     case StateEvent::LAST_BATCH_SENT:
-      DCHECK_EQ(current_state, TFInstanceExecState::PRODUCING_DATA);
-      next_state = TFInstanceExecState::LAST_BATCH_SENT;
+      DCHECK_EQ(current_state, FInstanceExecStatePB::PRODUCING_DATA);
+      next_state = FInstanceExecStatePB::LAST_BATCH_SENT;
       break;
 
     case StateEvent::EXEC_END:
       // Allow abort in all states to make error handling easier.
       event_sequence_->MarkEvent("ExecInternal Finished");
-      next_state = TFInstanceExecState::FINISHED;
+      next_state = FInstanceExecStatePB::FINISHED;
       break;
 
     default:
@@ -518,7 +518,7 @@ void FragmentInstanceState::PublishFilter(const TPublishFilterParams& params) {
   runtime_state_->filter_bank()->PublishGlobalFilter(params);
 }
 
-string FragmentInstanceState::ExecStateToString(const TFInstanceExecState::type state) {
+string FragmentInstanceState::ExecStateToString(const FInstanceExecStatePB state) {
   // Labels to send to the debug webpages to display the current state to the user.
   static const string finstance_state_labels[] = {
       "Waiting for Exec",         // WAITING_FOR_EXEC
@@ -533,9 +533,8 @@ string FragmentInstanceState::ExecStateToString(const TFInstanceExecState::type 
 
   };
   /// Make sure we have a label for every possible state.
-  static_assert(
-      sizeof(finstance_state_labels) / sizeof(char*) == TFInstanceExecState::FINISHED + 1,
-      "");
+  static_assert(sizeof(finstance_state_labels) / sizeof(char*) ==
+      FInstanceExecStatePB::FINISHED + 1, "");
 
   DCHECK_LT(state, sizeof(finstance_state_labels) / sizeof(char*))
       << "Unknown instance state";

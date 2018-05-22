@@ -192,3 +192,13 @@ class TestFailpoints(ImpalaTestSuite):
     self.client.close_query(handle)
     assert cancel_result.status_code == 0,\
         'Unexpected status code from cancel request: %s' % cancel_result
+
+  def test_report_status_failures(self):
+    TEST_QUERY = "select count(*) from tpch_parquet.lineitem t1, tpch_parquet.lineitem t2\
+        where t1.l_orderkey = t2.l_orderkey"
+    EXPECTED_RESULT = ['30012985']
+    for debug_action in ['REPORT_STATUS_SERIALIZE_PROFILE:FAIL@1.0',
+                         'REPORT_STATUS_DESERIALIZE_PROFILE:FAIL@1.0']:
+      result = self.execute_query(TEST_QUERY,
+                   query_options={'debug_action': debug_action})
+      assert result.data == EXPECTED_RESULT

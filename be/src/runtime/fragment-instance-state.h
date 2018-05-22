@@ -28,6 +28,7 @@
 #include "common/thread-debug-info.h"
 #include "util/promise.h"
 
+#include "gen-cpp/control_service.pb.h"
 #include "gen-cpp/ImpalaInternalService_types.h"
 #include "runtime/row-batch.h"
 #include "util/condition-variable.h"
@@ -102,7 +103,7 @@ class FragmentInstanceState {
   PlanRootSink* root_sink() { return root_sink_; }
 
   /// Returns a string description of 'current_state_'.
-  static string ExecStateToString(const TFInstanceExecState::type state);
+  static string ExecStateToString(const FInstanceExecStatePB state);
 
   /// Name of the counter that is tracking per query, per host peak mem usage.
   /// TODO: this doesn't look like it belongs here
@@ -116,8 +117,9 @@ class FragmentInstanceState {
   const TPlanFragmentInstanceCtx& instance_ctx() const { return instance_ctx_; }
   const TUniqueId& query_id() const { return query_ctx().query_id; }
   const TUniqueId& instance_id() const { return instance_ctx_.fragment_instance_id; }
-  TFInstanceExecState::type current_state() const { return current_state_.Load(); }
+  FInstanceExecStatePB current_state() const { return current_state_.Load(); }
   const TNetworkAddress& coord_address() const { return query_ctx().coord_address; }
+  int32_t ReportVersion() { return report_version_.Add(1); }
   ObjectPool* obj_pool();
 
   /// Returns true if the current thread is a thread executing the whole or part of
@@ -163,6 +165,9 @@ class FragmentInstanceState {
   /// by report_thread_lock_.
   bool report_thread_active_ = false;
 
+  /// Version number used in status report to prevent duplicated report.
+  AtomicInt32 report_version_;
+
   /// Profile for timings for each stage of the plan fragment instance's lifecycle.
   /// Lives in obj_pool().
   RuntimeProfile* timings_profile_ = nullptr;
@@ -196,8 +201,7 @@ class FragmentInstanceState {
 
   /// The current state of this fragment instance's execution. Only updated by the
   /// fragment instance thread in UpdateState() and read by the profile reporting threads.
-  AtomicEnum<TFInstanceExecState::type> current_state_{
-    TFInstanceExecState::WAITING_FOR_EXEC};
+  AtomicEnum<FInstanceExecStatePB> current_state_{FInstanceExecStatePB::WAITING_FOR_EXEC};
 
   /// Output sink for rows sent to this fragment. Created in Prepare(), lives in
   /// obj_pool().

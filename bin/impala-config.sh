@@ -559,6 +559,10 @@ export HBASE_CONF_DIR="$IMPALA_FE_DIR/src/test/resources"
 # Set $THRIFT_HOME to the Thrift directory in toolchain.
 export THRIFT_HOME="${IMPALA_TOOLCHAIN}/thrift-${IMPALA_THRIFT_VERSION}"
 
+# Add Protobuf directory in toolchain to $PATH.
+export PROTOBUF_HOME="${IMPALA_TOOLCHAIN}/protobuf-${IMPALA_PROTOBUF_VERSION}"
+export PATH="${PROTOBUF_HOME}/bin:$PATH"
+
 # ASAN needs a matching version of llvm-symbolizer to symbolize stack traces.
 export ASAN_SYMBOLIZER_PATH="${IMPALA_TOOLCHAIN}/llvm-${IMPALA_LLVM_ASAN_VERSION}/bin/llvm-symbolizer"
 

@@ -34,11 +34,14 @@
 
 namespace impala {
 
+class ControlServiceProxy;
 class FragmentInstanceState;
 class InitialReservations;
 class MemTracker;
+class ReportExecStatusRequestPB;
 class ReservationTracker;
 class RuntimeState;
+class ThriftSerializer;
 
 /// Central class for all backend execution state (example: the FragmentInstanceStates
 /// of the individual fragment instances) created for a particular query.
@@ -128,7 +131,7 @@ class QueryState {
   ReservationTracker* buffer_reservation() const { return buffer_reservation_; }
   InitialReservations* initial_reservations() const { return initial_reservations_; }
   TmpFileMgr::FileGroup* file_group() const { return file_group_; }
-  const TExecQueryFInstancesParams& rpc_params() const { return rpc_params_; }
+  const TExecQueryFInstancesParams& exec_rpc_params() const { return exec_rpc_params_; }
 
   // the following getters are only valid after StartFInstances()
   const DescriptorTbl& desc_tbl() const { return *desc_tbl_; }
@@ -141,7 +144,7 @@ class QueryState {
   ///
   /// Uses few cycles and never blocks. Not idempotent, not thread-safe.
   /// The remaining public functions must be called only after Init().
-  Status Init(const TExecQueryFInstancesParams& rpc_params) WARN_UNUSED_RESULT;
+  Status Init(const TExecQueryFInstancesParams& exec_rpc_params) WARN_UNUSED_RESULT;
 
   /// Performs the runtime-intensive parts of initial setup and starts all fragment
   /// instances belonging to this query. Each instance receives its own execution
@@ -297,10 +300,14 @@ class QueryState {
   /// the top-level MemTracker for this query (owned by obj_pool_), created in c'tor
   MemTracker* query_mem_tracker_ = nullptr;
 
-  /// set in Prepare(); rpc_params_.query_ctx is *not* set to avoid duplication
-  /// with query_ctx_
+  /// The RPC proxy used when reporting status of fragment instances to coordinator.
+  /// Set in Init().
+  std::unique_ptr<ControlServiceProxy> proxy_;
+
+  /// Set in Init(); exec_rpc_params_.query_ctx is *not* set to avoid duplication
+  /// with query_ctx_.
   /// TODO: find a way not to have to copy this
-  TExecQueryFInstancesParams rpc_params_;
+  TExecQueryFInstancesParams exec_rpc_params_;
 
   /// Buffer reservation for this query (owned by obj_pool_). Set in Prepare().
   ReservationTracker* buffer_reservation_ = nullptr;
@@ -379,6 +386,13 @@ class QueryState {
   /// Releases resources used for query execution. Guaranteed to be called only once.
   /// Must be called before destroying the QueryState. Not idempotent and not thread-safe.
   void ReleaseExecResources();
+
+  /// Helper for ReportExecStatus() to construct a status report to be sent to the
+  /// coordinator. If 'fis' is not NULL, the runtime profile is serialized by the Thrift
+  /// serializer 'serializer' and stored in 'profile_buf'.
+  void ConstructReport(bool done, const Status& status,
+      FragmentInstanceState* fis, ReportExecStatusRequestPB* report,
+      ThriftSerializer* serializer, uint8_t** profile_buf, uint32_t* len);
 
   /// Same behavior as ReportExecStatus().
   /// Cancel on error only if instances_started is true.

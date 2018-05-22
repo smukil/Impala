@@ -92,3 +92,10 @@ class TestRPCException(CustomClusterTestSuite):
   @CustomClusterTestSuite.with_args("--fault_injection_rpc_exception_type=10")
   def test_rpc_secure_recv_timed_out(self, vector):
     self.execute_test_query(None)
+
+  @pytest.mark.execute_serially
+  @CustomClusterTestSuite.with_args("--status_report_interval=1 \
+                                     --control_service_queue_mem_limit=1 \
+                                     --control_service_num_svc_threads=1")
+  def test_rpc_report_status_retry(self, vector):
+    self.execute_test_query(None)
