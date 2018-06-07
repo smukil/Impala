@@ -276,7 +276,7 @@ class Coordinator { // NOLINT: The member variables could be re-ordered to save 
   /// cancellation. Initialized in StartBackendExec().
   boost::scoped_ptr<CountingBarrier> backend_exec_complete_barrier_;
 
-  SpinLock exec_state_lock_; // protects exec-state_ and exec_status_
+  SpinLock exec_state_lock_; // protects exec_state_ and exec_status_
 
   /// EXECUTING: in-flight; the only non-terminal state
   /// RETURNED_RESULTS: GetNext() set eos to true, or for DML, the request is complete

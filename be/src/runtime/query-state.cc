@@ -38,6 +38,7 @@
 
 #include "common/names.h"
 
+DEFINE_int32(status_report_interval, 5, "interval between profile reports; in seconds");
 DEFINE_int32(report_status_retry_interval_ms, 100,
     "The interval in milliseconds to wait before retrying a failed status report RPC to "
     "the coordinator.");
@@ -200,18 +201,69 @@ FragmentInstanceState* QueryState::GetFInstanceState(const TUniqueId& instance_i
   return it != fis_map_.end() ? it->second : nullptr;
 }
 
-void QueryState::ReportExecStatus(bool done, const Status& status,
-    FragmentInstanceState* fis) {
-  ReportExecStatusAux(done, status, fis, true);
+void QueryState::ReportProfileThread() {
+  VLOG_FILE << "ReportProfileThread(): instance_id=" << PrintId(instance_id());
+
+  // Don't start periodic reporting until all the fragment instances have been Prepare()'d
+  // or if any of the fragment instances failed to start.
+  if (!WaitForPrepare().ok()) return;
+
+  unique_lock<mutex> l(report_thread_lock_);
+  // tell Prepare() that we started
+  report_thread_active_ = true;
+  report_thread_started_cv_.NotifyOne();
+
+  // We don't want to wait longer than it takes to run the entire fragment.
+  stop_report_thread_cv_.WaitFor(l, FLAGS_status_report_interval * MICROS_PER_SEC);
+  while (report_thread_active_) {
+    // timed_wait can return because the timeout occurred or the condition variable
+    // was signaled.  We can't rely on its return value to distinguish between the
+    // two cases (e.g. there is a race here where the wait timed out but before grabbing
+    // the lock, the condition variable was signaled).  Instead, we will use an external
+    // flag, report_thread_active_, to coordinate this.
+    stop_report_thread_cv_.WaitFor(l, FLAGS_status_report_interval * MICROS_PER_SEC);
+
+   if (!report_thread_active_) break;
+     SendReport(false, Status::OK());
+  }
+
+  VLOG_FILE << "exiting reporting thread: instance_id=" << PrintId(instance_id());
+}
+ 
+void FragmentInstanceState::StopReportThread() {
+  if (!report_thread_active_) return;
+  {
+    lock_guard<mutex> l(report_thread_lock_);
+    report_thread_active_ = false;
+  }
+  stop_report_thread_cv_.NotifyOne();
+  report_thread_->Join();
+}
+
+void QueryState::SendReport(bool done, const Status& status) {
+  DCHECK(status.ok() || done);
+  DCHECK(runtime_state_ != nullptr);
+
+  vector<TFragmentInstanceExecStatus> instance_reports;
+  for (auto& fis : fis_map_) {
+    // Collect profile and status for 'fis'.
+    instance_reports.push_back(fis->GetStatusReport());
+  }
+
+  ReportExecStatusAux(done, status, instance_reports, true);
+}
+
+void QueryState::ReportFailedStartup(const Status& status, bool instances_started) {
+  vector<TFragmentInstanceExecStatus>& empty_vector;
+  ReportExecStatusAux(true, status, empty_vector, instances_started);
 }
 
 void QueryState::ReportExecStatusAux(bool done, const Status& status,
-    FragmentInstanceState* fis, bool instances_started) {
-  // if we're reporting an error, we're done
+    vector<TReportExecStatusParams>& fis_statuses, bool instances_started) {
+  // If we're reporting an error, we're done
   DCHECK(status.ok() || done);
-  // if this is not for a specific fragment instance, we're reporting an error
-  DCHECK(fis != nullptr || !status.ok());
-  DCHECK(fis == nullptr || fis->IsPrepared());
+  // If 'fis_statuses' is empty, we're reporting an error
+  DCHECK(!fis_statuses.empty() || !status.ok());
 
   // This will send a report even if we are cancelled.  If the query completed correctly
   // but fragments still need to be cancelled (e.g. limit reached), the coordinator will
@@ -223,30 +275,11 @@ void QueryState::ReportExecStatusAux(bool done, const Status& status,
   params.__set_coord_state_idx(rpc_params().coord_state_idx);
   status.SetTStatus(&params);
 
-  if (fis != nullptr) {
-    // create status for 'fis'
-    params.instance_exec_status.emplace_back();
-    params.__isset.instance_exec_status = true;
-    TFragmentInstanceExecStatus& instance_status = params.instance_exec_status.back();
-    instance_status.__set_fragment_instance_id(fis->instance_id());
-    status.SetTStatus(&instance_status);
-    instance_status.__set_done(done);
-    instance_status.__set_current_state(fis->current_state());
+  // Move the ownership of all the elements in 'fis_statuses' into
+  // 'params.instance_exec_status'.
+  swap(params.instance_exec_status, fis_statuses);
 
-    DCHECK(fis->profile() != nullptr);
-    fis->profile()->ToThrift(&instance_status.profile);
-    instance_status.__isset.profile = true;
-
-    // Only send updates to insert status if fragment is finished, the coordinator waits
-    // until query execution is done to use them anyhow.
-    RuntimeState* state = fis->runtime_state();
-    if (done && state->dml_exec_state()->ToThrift(&params.insert_exec_status)) {
-      params.__isset.insert_exec_status = true;
-    }
-    // Send new errors to coordinator
-    state->GetUnreportedErrors(&params.error_log);
-    params.__isset.error_log = (params.error_log.size() > 0);
-  }
+  // TODO: Get unreported errors.
 
   Status rpc_status;
   TReportExecStatusResult res;
@@ -307,7 +340,7 @@ void QueryState::StartFInstances() {
   Status status = DescriptorTbl::Create(&obj_pool_, query_ctx().desc_tbl, &desc_tbl_);
   if (!status.ok()) {
     instances_prepared_promise_.Set(status);
-    ReportExecStatusAux(true, status, nullptr, false);
+    ReportFailedStartup(status, false);
     return;
   }
   VLOG_QUERY << "descriptor table for query=" << PrintId(query_id())
@@ -332,6 +365,7 @@ void QueryState::StartFInstances() {
 
     // start new thread to execute instance
     refcnt_.Add(1); // decremented in ExecFInstance()
+    num_remaining_finstances_.Add(1);
     AcquireExecResourceRefcount(); // decremented in ExecFInstance()
     string thread_name = Substitute("$0 (finst:$1)",
         FragmentInstanceState::FINST_THREAD_NAME_PREFIX,
@@ -355,6 +389,17 @@ void QueryState::StartFInstances() {
     t->Detach();
   }
 
+  // TODO: XXX This might be a race. Report thread should start before
+  // fragment instances run Open()
+  // We need to start the profile-reporting thread before calling Open(),
+  // since it may block.
+  if (FLAGS_status_report_interval > 0) {
+    string thread_name = Substitute("profile-report (finst:$0)", PrintId(instance_id()));
+    unique_lock<mutex> l(report_thread_lock_);
+    RETURN_IF_ERROR(Thread::Create(FragmentInstanceState::FINST_THREAD_GROUP_NAME,
+      thread_name, [this]() { this->ReportProfileThread(); }, &report_thread_, true));
+  }
+
   // don't return until every instance is prepared and record the first non-OK
   // (non-CANCELLED if available) status (including any error from thread creation
   // above).
@@ -372,7 +417,7 @@ void QueryState::StartFInstances() {
   // coordinator to start query cancellation. (Other errors are reported by the
   // fragment instance itself.)
   if (!thread_create_status.ok()) {
-    ReportExecStatusAux(true, thread_create_status, nullptr, true);
+    ReportFailedStartup(thread_create_status, true);
   }
 }
 
@@ -398,6 +443,15 @@ void QueryState::ExecFInstance(FragmentInstanceState* fis) {
       << " coord_state_idx=" << rpc_params().coord_state_idx
       << " #in-flight="
       << ImpaladMetrics::IMPALA_SERVER_NUM_FRAGMENTS_IN_FLIGHT->GetValue();
+
+  {
+    // TODO: Can we do something smarter here?
+    // Make sure the thread started up, otherwise ReportProfileThread() might get into
+    // a race with StopReportThread().
+    unique_lock<mutex> l(report_thread_active_);
+    while(!report_thread_started_) report_thread_started_cv_.Wait(l);
+  }
+
   Status status = fis->Exec();
   ImpaladMetrics::IMPALA_SERVER_NUM_FRAGMENTS_IN_FLIGHT->Increment(-1L);
   VLOG_QUERY << "Instance completed. instance_id=" << PrintId(fis->instance_id())
@@ -410,6 +464,16 @@ void QueryState::ExecFInstance(FragmentInstanceState* fis) {
   ReleaseExecResourceRefcount();
   // decrement refcount taken in StartFInstances()
   ExecEnv::GetInstance()->query_exec_mgr()->ReleaseQueryState(this);
+
+  // Decrement the number of remaining fragment instances and send a final report if this
+  // is the last fragment instance to complete.
+  if (num_remaining_finstances_.Add(-1) == 0) {
+    StopReportThread();
+    // It's safe to send final report now that the reporting thread is stopped.
+    // TODO: We need to send the first error that was seen if this is a failure case,
+    // instead of returning the last error (which may mostly be CANCELLED).
+    SendReport(true, status);
+  }
 }
 
 void QueryState::Cancel() {

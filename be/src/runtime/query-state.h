@@ -160,12 +160,6 @@ class QueryState {
   /// execution resources.
   void ReleaseExecResourceRefcount();
 
-  /// Sends a ReportExecStatus rpc to the coordinator. If fis == nullptr, the
-  /// status must be an error. If fis is given, the content will depend on whether
-  /// the fis has finished its Prepare phase. It sends a report for the instance,
-  /// and it will include the profile if the fis is prepared. If the fis is not
-  /// prepared, the status must be an error.
-  /// If there is an error during the rpc, initiates cancellation.
   void ReportExecStatus(bool done, const Status& status, FragmentInstanceState* fis);
 
   /// Checks whether spilling is enabled for this query. Must be called before the first
@@ -231,6 +225,25 @@ class QueryState {
 
   ObjectPool obj_pool_;
   AtomicInt32 refcnt_;
+  AtomicInt32 num_remaining_finstances_;
+
+  /// profile reporting-related
+  std::unique_ptr<Thread> report_thread_;
+  boost::mutex report_thread_lock_;
+
+  /// Indicates that profile reporting thread should stop.
+  /// Tied to report_thread_lock_.
+  ConditionVariable stop_report_thread_cv_;
+
+  /// Indicates that profile reporting thread started.
+  /// Tied to report_thread_lock_.
+  ConditionVariable report_thread_started_cv_;
+
+  /// When the report thread starts, it sets report_thread_active_ to true and signals
+  /// report_thread_started_cv_. The report thread is shut down by setting
+  /// report_thread_active_ to false and signalling stop_report_thread_cv_. Protected
+  /// by report_thread_lock_.
+  bool report_thread_active_ = false;
 
   /// set to 1 when any fragment instance fails or when Cancel() is called; used to
   /// initiate cancellation exactly once
@@ -266,10 +279,18 @@ class QueryState {
   /// Must be called before destroying the QueryState. Not idempotent and not thread-safe.
   void ReleaseExecResources();
 
-  /// Same behavior as ReportExecStatus().
+  void ReportFailedStartup(const Status& status, bool instances_started);
+
+  // TODO: Adjust comment.
+  /// Sends a ReportExecStatus rpc to the coordinator. If fis == nullptr, the
+  /// status must be an error. If fis is given, the content will depend on whether
+  /// the fis has finished its Prepare phase. It sends a report for the instance,
+  /// and it will include the profile if the fis is prepared. If the fis is not
+  /// prepared, the status must be an error.
+  /// If there is an error during the rpc, initiates cancellation.
   /// Cancel on error only if instances_started is true.
-  void ReportExecStatusAux(bool done, const Status& status, FragmentInstanceState* fis,
-      bool instances_started);
+  void ReportExecStatusAux(bool done, const Status& status,
+      vector<TFragmentInstanceExecStatus>& fis_statuses, bool instances_started);
 };
 }
 
