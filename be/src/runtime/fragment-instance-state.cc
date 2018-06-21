@@ -73,14 +73,29 @@ FragmentInstanceState::FragmentInstanceState(
 Status FragmentInstanceState::Exec() {
   Status status = Prepare();
   DCHECK(runtime_state_ != nullptr);  // we need to guarantee at least that
+
+  // TODO: Merge the next 9 lines into a single function after logically aligning the FIS
+  // state machine with the QueryState state machine. Do the same for Open() and
+  // ExecInternal()
   discard_result(prepared_promise_.Set(status));
   if (!status.ok()) {
+    // Tell the managing 'QueryState' that we hit an error during Prepare().
+    query_state_->ErrorDuringPrepare(status, instance_id());
     discard_result(opened_promise_.Set(status));
     goto done;
   }
+  // Tell the managing 'QueryState' that we're done with Prepare().
+  query_state_->DonePreparing();
+
   status = Open();
   discard_result(opened_promise_.Set(status));
-  if (!status.ok()) goto done;
+  if (!status.ok()) {
+    // Tell the managing 'QueryState' that we hit an error during Open().
+    query_state_->ErrorDuringOpen(status, instance_id());
+    goto done;
+  }
+  // Tell the managing 'QueryState' that we're done with Open().
+  query_state_->DoneOpening();
 
   {
     // Must go out of scope before Finalize(), otherwise counter will not be
@@ -89,6 +104,15 @@ Status FragmentInstanceState::Exec() {
     SCOPED_TIMER(ADD_TIMER(timings_profile_, EXEC_TIMER_NAME));
     status = ExecInternal();
   }
+
+  if (!status.ok()) {
+    // Tell the managing 'QueryState' that we hit an error during execution.
+    query_state_->ErrorDuringExecute(status, instance_id());
+    goto done;
+  }
+  // Tell the managing 'QueryState' that we're done with executing and that we've stopped
+  // the reporting thread.
+  query_state_->DoneExecuting();
 
 done:
   UpdateState(StateEvent::EXEC_END);

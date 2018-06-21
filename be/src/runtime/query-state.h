@@ -61,6 +61,16 @@ class RuntimeState;
 /// When any fragment instance execution returns with an error status, all
 /// fragment instances are automatically cancelled.
 ///
+/// We maintain a query state denoted by BackedExecState. We transition from one non-error
+/// state to the next only if *all* underlying fragment instances have done so, however,
+/// if any fragment instance hits an error or cancellation, then we immediately change the
+/// state of the query to the corresponding error state.
+///
+/// Eg: BackendExecState of the query will go from PREPARED to OPENED only if *all*
+/// underlying fragment instances have finished Prepare().
+/// On the other hand, if *one* fragment instance hits an error during the PREPARED state,
+/// the BackendExecState of the query immediately goes from PREPARED to ERROR.
+///
 /// Status reporting: all instances currently report their status independently.
 /// Each instance sends at least one final status report with its overall execution
 /// status, so if any of the instances encountered an error, that error will be reported.
@@ -134,9 +144,12 @@ class QueryState {
   /// Not idempotent, not thread-safe.
   void StartFInstances();
 
-  /// Return overall status of Prepare phases of fragment instances. A failure
-  /// in any instance's Prepare will cause this function to return an error status.
-  /// Blocks until all fragment instances have finished their Prepare phase.
+  /// Monitors all the fragment instances and updates the BackendExecState according
+  /// to the stages that the query has reached.
+  /// TODO (IMPALA-2990): Move periodic status reporting to this funciton.
+  void MonitorFInstances();
+
+  /// Same as WaitForPrepareInternal() but returns only a 'Status' object.
   Status WaitForPrepare();
 
   /// Blocks until all fragment instances have finished their Prepare phase.
@@ -176,6 +189,48 @@ class QueryState {
 
   ~QueryState();
 
+  /// We use this to tie an error status to the fragment instance ID of that which hit the
+  /// error.
+  typedef pair<Status, TUniqueId> FInstanceStatus;
+
+  /// TODO: We can avoid having multiple functions for Done*() and ErrorDuring*() after
+  /// logically aligning the FIS state machine with the QueryState state machine.
+  /// Function called by a FragmentInstanceState thread to notify that it's done preparing
+  void DonePreparing() {
+    DoneWithState(num_remaining_finstances_preparing_, instances_prepared_promise_);
+  }
+
+  /// Function called by a FragmentInstanceState thread to notify that it's done opening
+  void DoneOpening() {
+    DoneWithState(num_remaining_finstances_opening_, instances_opened_promise_);
+  }
+
+  /// Function called by a FragmentInstanceState thread to notify that it's done executing
+  void DoneExecuting() {
+    DoneWithState(num_remaining_finstances_executing_, instances_finished_promise_);
+  }
+
+  /// Function called by a FragmentInstanceState thread to notify that it hit an error
+  /// during Prepare()
+  void ErrorDuringPrepare(const Status& status, const TUniqueId& finst_id) {
+    ErrorDuringState(status, finst_id, num_remaining_finstances_preparing_,
+        instances_prepared_promise_);
+  }
+
+  /// Function called by a FragmentInstanceState thread to notify that it hit an error
+  /// during Open()
+  void ErrorDuringOpen(const Status& status, const TUniqueId& finst_id) {
+    ErrorDuringState(
+        status, finst_id, num_remaining_finstances_opening_, instances_opened_promise_);
+  }
+
+  /// Function called by a FragmentInstanceState thread to notify that it hit an error
+  /// during Execute()
+  void ErrorDuringExecute(const Status& status, const TUniqueId& finst_id) {
+    ErrorDuringState(status, finst_id, num_remaining_finstances_executing_,
+        instances_finished_promise_);
+  }
+
  private:
   friend class QueryExecMgr;
 
@@ -184,6 +239,111 @@ class QueryState {
   friend class TestEnv;
 
   static const int DEFAULT_BATCH_SIZE = 1024;
+
+  /// Helper function to decrement 'counter' by one and notify 'promise' with a successful
+  /// 'FInstanceStatus' if 'counter' reaches 0.
+  void DoneWithState(AtomicInt32& counter, Promise<pair<Status, TUniqueId>>& promise) {
+    if (counter.Add(-1) == 0) {
+      promise.Set(FInstanceStatus(Status::OK(), TUniqueId()));
+    }
+  }
+
+  /// Helper function to notify 'promise' of an error 'status' hit by 'finst_id' and set
+  /// 'counter' to 0.
+  /// Can be called by multiple threads, but only one thread will win the race and set
+  /// the promise. If 'counter' is <= 0 before we CAS, that means some other thread won
+  /// the race to set the promise.
+  void ErrorDuringState(const Status& status, const TUniqueId& finst_id,
+      AtomicInt32& counter, Promise<pair<Status, TUniqueId>>& promise) {
+    int remaining = counter.Load();
+    while (remaining > 0 && !counter.CompareAndSwap(remaining, 0)) {
+      remaining = counter.Load();
+    }
+    // If 'remaining' is less than or equal to 0, we lost the race to another thread that
+    // called this function.
+    if (remaining <= 0) return;
+    // If not, then we've won the race to set the error.
+    promise.Set(pair<Status, TUniqueId>(status, finst_id));
+  }
+
+  /// Return overall status of Prepare() phases of fragment instances. A failure
+  /// in any instance's Prepare() will cause this function to return an error status.
+  /// Blocks until all fragment instances have finished their Prepare() phase.
+  FInstanceStatus WaitForPrepareInternal();
+
+  /// Return overall status of Open() phases of fragment instances. A failure
+  /// in any instance's Open() will cause this function to return an error status.
+  /// Blocks until all fragment instances have finished their Open() phase.
+  FInstanceStatus WaitForOpenInternal();
+
+  /// Return overall status of all fragment instances during execution. A failure
+  /// in any instance's execution (after Prepare(), Open()) will cause this function
+  /// to return an error status. Blocks until all fragment instances have finished
+  /// executing.
+  FInstanceStatus WaitForFinishInternal();
+
+  /// States that a query goes through during its lifecycle.
+  enum class BackendExecState {
+    /// INITIALIZED: The inital state on receiving an ExecQueryFInstances() RPC from the
+    /// coordinator. Implies that the fragment instances are being started.
+    INITIALIZED,
+    /// STARTED: All fragment instances have been started. Implies that the query is
+    /// being prepared.
+    STARTED,
+    /// PREPARED: All fragment instances managed by this QueryState have successfully
+    /// completed Prepare(). Implies that the query is Opening.
+    PREPARED,
+    /// OPENED: All fragment instances managed by this QueryState have successfully
+    /// completed Open(). Implies that the query is executing.
+    OPENED,
+    /// FINISHED: All fragment instances managed by this QueryState have successfully
+    /// completed executing. The QueryState is ready for tear-down at this state.
+    FINISHED,
+    /// CANCELLED: Cancel() was called on this query.
+    CANCELLED,
+    /// ERROR: received an error from a fragment instance
+    ERROR
+  };
+  BackendExecState query_exec_state_ = BackendExecState::INITIALIZED;
+
+  /// Updates the query status and query state. A state transition happens if the current
+  /// state is a non-terminal state; the transition can either be to the next legal state
+  /// or ERROR if 'status' is an error.
+  /// Not thread-safe since we only expect a single thread to call this function.
+  Status UpdateQueryState(const FInstanceStatus& status);
+
+  /// Today, this does nothing other than validate that the state transition was legal,
+  /// but after IMPALA-2990, it will handle all the logic once a terminal state is
+  /// reached.
+  void HandleExecStateTransition(
+      const BackendExecState& old_state, const BackendExecState& new_state);
+
+  /// Transitions form a non-terminal state to the next state in the lifecycle. This
+  /// does not transition to the ERROR or CANCELLED states, or in other words, this must
+  /// not be called on an error. Thread-safety should be managed by caller.
+  //
+  /// The possible transitions are:
+  /// INITIALIZED -> STARTED -> PREPARED -> OPENED -> FINISHED
+  void TransitionNonTerminalExecState();
+
+  /// A string representation of 'state'.
+  const char* BackendExecStateToString(const BackendExecState& state);
+
+  /// Returns 'true' if 'state' is a terminal state (FINISHED, CANCELLED, ERROR).
+  inline bool IsTerminalState(const BackendExecState& state);
+
+  /// Validates if it's legal to transition from 'old_state' to 'new_state'. Only enabled
+  /// on debug builds.
+  inline void DebugIsLegalExecStateTransition(
+      const BackendExecState& old_state, const BackendExecState& new_state);
+
+  /// The status of this QueryState.
+  /// Status::OK if all the fragment instances managed by this QS are also Status::OK
+  Status query_status_;
+
+  AtomicInt32 num_remaining_finstances_preparing_;
+  AtomicInt32 num_remaining_finstances_opening_;
+  AtomicInt32 num_remaining_finstances_executing_;
 
   /// set in c'tor
   const TQueryCtx query_ctx_;
@@ -216,9 +376,20 @@ class QueryState {
   /// created in StartFInstances(), owned by obj_pool_
   DescriptorTbl* desc_tbl_ = nullptr;
 
-  /// Barrier for the completion of the Prepare phases of all fragment instances,
-  /// set in StartFInstances().
-  Promise<Status> instances_prepared_promise_;
+  /// Barrier for the completion of the Prepare() phases of all fragment instances.
+  /// If the 'Status' is not OK due to an error during fragment instance execution,
+  /// we also get the ID of the fragment instance that set the error.
+  Promise<pair<Status, TUniqueId>> instances_prepared_promise_;
+
+  /// Barrier for the completion of the Open() phases of all fragment instances.
+  /// If the 'Status' is not OK due to an error during fragment instance execution,
+  /// we also get the ID of the fragment instance that set the error.
+  Promise<pair<Status, TUniqueId>> instances_opened_promise_;
+
+  /// Barrier for the completion of all the fragment instances.
+  /// If the 'Status' is not OK due to an error during fragment instance execution,
+  /// we also get the ID of the fragment instance that set the error.
+  Promise<pair<Status, TUniqueId>> instances_finished_promise_;
 
   /// map from instance id to its state (owned by obj_pool_), populated in
   /// StartFInstances(); not valid to read from until instances_prepare_promise_

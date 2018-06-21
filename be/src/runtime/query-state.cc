@@ -138,6 +138,10 @@ Status QueryState::Init(const TExecQueryFInstancesParams& rpc_params) {
   rpc_params_.fragment_instance_ctxs.swap(non_const_params.fragment_instance_ctxs);
   rpc_params_.__isset.fragment_instance_ctxs = true;
 
+  num_remaining_finstances_preparing_.Store(rpc_params_.fragment_instance_ctxs.size());
+  num_remaining_finstances_opening_.Store(rpc_params_.fragment_instance_ctxs.size());
+  num_remaining_finstances_executing_.Store(rpc_params_.fragment_instance_ctxs.size());
+
   // Claim the query-wide minimum reservation. Do this last so that we don't need
   // to handle releasing it if a later step fails.
   initial_reservations_ = obj_pool_.Add(new InitialReservations(&obj_pool_,
@@ -193,9 +197,139 @@ Status QueryState::InitBufferPoolState() {
   return Status::OK();
 }
 
+#ifdef NDEBUG
+#define IS_LEGAL_EXEC_STATE_TRANSITION(old_state, new_state) \
+  DebugIsLegalExecStateTransition(old_state, new_state)
+#else
+#define IS_LEGAL_EXEC_STATE_TRANSITION(old_state, new_state)
+#endif
+
+const char* QueryState::BackendExecStateToString(const BackendExecState& state) {
+  static const unordered_map<BackendExecState, const char*> exec_state_to_str{
+      {BackendExecState::INITIALIZED, "INITIALIZED"},
+      {BackendExecState::STARTED, "STARTED"},
+      {BackendExecState::PREPARED, "PREPARED"},
+      {BackendExecState::OPENED, "OPENED"},
+      {BackendExecState::FINISHED, "FINISHED"},
+      {BackendExecState::CANCELLED, "CANCELLED"},
+      {BackendExecState::ERROR, "ERROR"}};
+  return exec_state_to_str.at(state);
+}
+
+inline bool QueryState::IsTerminalState(const BackendExecState& state) {
+  return state == BackendExecState::FINISHED
+      || state == BackendExecState::CANCELLED
+      || state == BackendExecState::ERROR;
+}
+
+inline void QueryState::DebugIsLegalExecStateTransition(
+    const BackendExecState& old_state, const BackendExecState& new_state) {
+  if (new_state != BackendExecState::CANCELLED && new_state != BackendExecState::ERROR) {
+    if (old_state == BackendExecState::INITIALIZED) {
+      DCHECK(new_state == BackendExecState::STARTED);
+    } else if (old_state == BackendExecState::STARTED) {
+      DCHECK(new_state == BackendExecState::PREPARED);
+    } else if (old_state == BackendExecState::PREPARED) {
+      DCHECK(new_state == BackendExecState::OPENED);
+    } else if (old_state == BackendExecState::OPENED) {
+      DCHECK(new_state == BackendExecState::FINISHED);
+    }
+  } else {
+    // If we're already in a terminal state, then we shouldn't transition to a CANCELLED
+    // or ERROR state after that.
+    DCHECK(!IsTerminalState(old_state));
+  }
+}
+
+void QueryState::TransitionNonTerminalExecState() {
+  QueryState::BackendExecState old_state = query_exec_state_;
+  switch (old_state) {
+    case BackendExecState::INITIALIZED:
+      query_exec_state_ = BackendExecState::STARTED;
+      break;
+    case BackendExecState::STARTED:
+      query_exec_state_ = BackendExecState::PREPARED;
+      break;
+    case BackendExecState::PREPARED:
+      query_exec_state_ = BackendExecState::OPENED;
+      break;
+    case BackendExecState::OPENED:
+      query_exec_state_ = BackendExecState::FINISHED;
+      break;
+    default:
+      // We shouldn't try to transition if we're already in a terminal state.
+      DCHECK(true) << "ILLEGAL: Cannot transition from terminal state ("
+                   << BackendExecStateToString(old_state) << ")";
+  }
+}
+
+void QueryState::HandleExecStateTransition(const QueryState::BackendExecState& old_state,
+    const QueryState::BackendExecState& new_state) {
+  if (old_state == new_state) return;
+  IS_LEGAL_EXEC_STATE_TRANSITION(old_state, new_state);
+
+  // If we've transitioned to a non-terminal state, then we have nothing more to do.
+  if (!IsTerminalState(new_state)) return;
+
+  // TODO (IMPALA-2990): Move query termination logic here.
+}
+
+Status QueryState::UpdateQueryState(const FInstanceStatus& finst_status) {
+  Status ret_status;
+  Status status = finst_status.first;
+  TUniqueId failed_instance = finst_status.second;
+  BackendExecState old_state, new_state;
+
+  old_state = query_exec_state_;
+  switch (old_state) {
+    case BackendExecState::INITIALIZED:
+    case BackendExecState::STARTED:
+    case BackendExecState::PREPARED:
+    case BackendExecState::OPENED:
+      DCHECK(query_status_.ok()) << query_status_;
+      if (!status.ok()) {
+        // Error while executing - go to ERROR state.
+        query_status_ = status;
+        query_exec_state_ = BackendExecState::ERROR;
+      } else {
+        // Transition to the next state in the lifecycle.
+        TransitionNonTerminalExecState();
+      }
+      break;
+    case BackendExecState::FINISHED:
+      // // Already finished. Leave query exec status as OK, stay in this state.
+      DCHECK(query_status_.ok()) << query_status_;
+      break;
+    case BackendExecState::CANCELLED:
+      // Coordinator initiated cancellation already, stay in this state. Ignores errors
+      // after requested cancellations.
+      DCHECK(query_status_.IsCancelled()) << query_status_;
+      break;
+    case BackendExecState::ERROR:
+      DCHECK(!query_status_.ok());
+      // Do nothing in this case, so as to preserve the first seen error.
+      // TODO: Add to 'unreported errors'.
+  }
+  new_state = query_exec_state_;
+  ret_status = query_status_;
+  // Log interesting status: a non-cancelled error or a cancellation if we were in the
+  // middle of an execution.
+  if (!status.ok() && (!status.IsCancelled() || !IsTerminalState(old_state))) {
+    VLOG_QUERY << Substitute("BackendExecState: query id=$0 finstance=$1  ($2 -> $3) "
+                             "status=$4",
+        PrintId(query_id()),
+        failed_instance != TUniqueId() ? PrintId(failed_instance) : "N/A",
+        BackendExecStateToString(old_state), BackendExecStateToString(new_state),
+        status.GetDetail());
+  }
+  // Apply the state transition (if any).
+  HandleExecStateTransition(old_state, new_state);
+  return ret_status;
+}
+
 FragmentInstanceState* QueryState::GetFInstanceState(const TUniqueId& instance_id) {
   VLOG_FILE << "GetFInstanceState(): instance_id=" << PrintId(instance_id);
-  if (!instances_prepared_promise_.Get().ok()) return nullptr;
+  if (!WaitForPrepare().ok()) return nullptr;
   auto it = fis_map_.find(instance_id);
   return it != fis_map_.end() ? it->second : nullptr;
 }
@@ -293,7 +427,37 @@ void QueryState::ReportExecStatusAux(bool done, const Status& status,
 }
 
 Status QueryState::WaitForPrepare() {
-  return instances_prepared_promise_.Get();
+  return WaitForPrepareInternal().first;
+}
+
+QueryState::FInstanceStatus QueryState::WaitForPrepareInternal() {
+  FInstanceStatus prepare_status = instances_prepared_promise_.Get();
+
+  // If 'prepare_status' is OK, then all the fragment instances have completed Prepare()
+  // successfully.
+  if (!prepare_status.first.ok()) {
+    // If 'prepare_status' is not OK, then one of the fragment instances has hit an error.
+    // Don't return until every instance is prepared and record the first non-OK
+    // (non-CANCELLED if available) status.
+    for (auto entry : fis_map_) {
+      Status instance_status = entry.second->WaitForPrepare();
+      // don't wipe out an error in one instance with the resulting CANCELLED from
+      // the remaining instances
+      if (!instance_status.ok() && prepare_status.first.IsCancelled()) {
+        prepare_status.first = instance_status;
+        prepare_status.second = entry.first;
+      }
+    }
+  }
+  return prepare_status;
+}
+
+QueryState::FInstanceStatus QueryState::WaitForOpenInternal() {
+  return instances_opened_promise_.Get();
+}
+
+QueryState::FInstanceStatus QueryState::WaitForFinishInternal() {
+  return instances_finished_promise_.Get();
 }
 
 void QueryState::StartFInstances() {
@@ -306,7 +470,7 @@ void QueryState::StartFInstances() {
   DCHECK(query_ctx().__isset.desc_tbl);
   Status status = DescriptorTbl::Create(&obj_pool_, query_ctx().desc_tbl, &desc_tbl_);
   if (!status.ok()) {
-    discard_result(instances_prepared_promise_.Set(status));
+    ErrorDuringPrepare(status, TUniqueId());
     ReportExecStatusAux(true, status, nullptr, false);
     return;
   }
@@ -333,6 +497,10 @@ void QueryState::StartFInstances() {
     // start new thread to execute instance
     refcnt_.Add(1); // decremented in ExecFInstance()
     AcquireExecResourceRefcount(); // decremented in ExecFInstance()
+
+    // Add fragment instance to map before starting the fragment instance.
+    fis_map_.emplace(fis->instance_id(), fis);
+
     string thread_name = Substitute("$0 (finst:$1)",
         FragmentInstanceState::FINST_THREAD_NAME_PREFIX,
         PrintId(instance_ctx.fragment_instance_id));
@@ -340,6 +508,9 @@ void QueryState::StartFInstances() {
     thread_create_status = Thread::Create(FragmentInstanceState::FINST_THREAD_GROUP_NAME,
         thread_name, [this, fis]() { this->ExecFInstance(fis); }, &t, true);
     if (!thread_create_status.ok()) {
+      // Remove fragment instance from the map since we failed to create the FIS thread.
+      fis_map_.erase(fis->instance_id());
+
       // Undo refcnt increments done immediately prior to Thread::Create(). The
       // reference counts were both greater than zero before the increments, so
       // neither of these decrements will free any structures.
@@ -347,33 +518,41 @@ void QueryState::StartFInstances() {
       ExecEnv::GetInstance()->query_exec_mgr()->ReleaseQueryState(this);
       break;
     }
-    // Fragment instance successfully started
-    fis_map_.emplace(fis->instance_id(), fis);
     // update fragment_map_
     vector<FragmentInstanceState*>& fis_list = fragment_map_[instance_ctx.fragment_idx];
     fis_list.push_back(fis);
     t->Detach();
   }
 
-  // don't return until every instance is prepared and record the first non-OK
-  // (non-CANCELLED if available) status (including any error from thread creation
-  // above).
-  Status prepare_status = thread_create_status;
-  for (auto entry: fis_map_) {
-    Status instance_status = entry.second->WaitForPrepare();
-    // don't wipe out an error in one instance with the resulting CANCELLED from
-    // the remaining instances
-    if (!instance_status.ok() && (prepare_status.ok() || prepare_status.IsCancelled())) {
-      prepare_status = instance_status;
-    }
+  FInstanceStatus all_fis_status;
+  // We prioritize thread creation failure as a query killing error, even over an error
+  // during Prepare() for a FIS.
+  all_fis_status.first = thread_create_status;
+  all_fis_status.second = TUniqueId();
+  if (!UpdateQueryState(all_fis_status).ok()) {
+    // We have to notify anyone waiting on WaitForPrepare() that this query has failed.
+    ErrorDuringPrepare(all_fis_status.first, all_fis_status.second);
+    return;
   }
-  discard_result(instances_prepared_promise_.Set(prepare_status));
-  // If this is aborting due to failure in thread creation, report status to the
-  // coordinator to start query cancellation. (Other errors are reported by the
-  // fragment instance itself.)
-  if (!thread_create_status.ok()) {
-    ReportExecStatusAux(true, thread_create_status, nullptr, true);
-  }
+  DCHECK(query_exec_state_ == BackendExecState::STARTED)
+      << BackendExecStateToString(query_exec_state_);
+}
+
+void QueryState::MonitorFInstances() {
+  FInstanceStatus all_fis_status = WaitForPrepareInternal();
+  if (!UpdateQueryState(all_fis_status).ok()) return;
+  DCHECK(query_exec_state_ == BackendExecState::PREPARED)
+      << BackendExecStateToString(query_exec_state_);
+
+  all_fis_status = WaitForOpenInternal();
+  if (!UpdateQueryState(all_fis_status).ok()) return;
+  DCHECK(query_exec_state_ == BackendExecState::OPENED)
+      << BackendExecStateToString(query_exec_state_);
+
+  all_fis_status = WaitForFinishInternal();
+  if (!UpdateQueryState(all_fis_status).ok()) return;
+  DCHECK(query_exec_state_ == BackendExecState::FINISHED)
+      << BackendExecStateToString(query_exec_state_);
 }
 
 void QueryState::AcquireExecResourceRefcount() {
@@ -414,13 +593,13 @@ void QueryState::ExecFInstance(FragmentInstanceState* fis) {
 
 void QueryState::Cancel() {
   VLOG_QUERY << "Cancel: query_id=" << PrintId(query_id());
-  (void) instances_prepared_promise_.Get();
+  discard_result(WaitForPrepare());
   if (!is_cancelled_.CompareAndSwap(0, 1)) return;
   for (auto entry: fis_map_) entry.second->Cancel();
 }
 
 void QueryState::PublishFilter(const TPublishFilterParams& params) {
-  if (!instances_prepared_promise_.Get().ok()) return;
+  if (!WaitForPrepare().ok()) return;
   DCHECK_EQ(fragment_map_.count(params.dst_fragment_idx), 1);
   for (FragmentInstanceState* fis : fragment_map_[params.dst_fragment_idx]) {
     fis->PublishFilter(params);
