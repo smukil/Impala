@@ -73,14 +73,21 @@ FragmentInstanceState::FragmentInstanceState(
 Status FragmentInstanceState::Exec() {
   Status status = Prepare();
   DCHECK(runtime_state_ != nullptr);  // we need to guarantee at least that
-  discard_result(prepared_promise_.Set(status));
+
   if (!status.ok()) {
+    // Tell the managing 'QueryState' that we hit an error during Prepare().
+    query_state_->ErrorDuringPrepare(status, instance_id());
     discard_result(opened_promise_.Set(status));
     goto done;
   }
+  // Tell the managing 'QueryState' that we're done with Prepare().
+  query_state_->DonePreparing();
+
   status = Open();
   discard_result(opened_promise_.Set(status));
-  if (!status.ok()) goto done;
+  if (!status.ok()) {
+    goto done;
+  }
 
   {
     // Must go out of scope before Finalize(), otherwise counter will not be
@@ -89,6 +96,15 @@ Status FragmentInstanceState::Exec() {
     SCOPED_TIMER(ADD_TIMER(timings_profile_, EXEC_TIMER_NAME));
     status = ExecInternal();
   }
+
+  if (!status.ok()) {
+    // Tell the managing 'QueryState' that we hit an error during execution.
+    query_state_->ErrorDuringExecute(status, instance_id());
+    goto done;
+  }
+  // Tell the managing 'QueryState' that we're done with executing and that we've stopped
+  // the reporting thread.
+  query_state_->DoneExecuting();
 
 done:
   UpdateState(StateEvent::EXEC_END);
@@ -99,10 +115,6 @@ done:
 }
 
 void FragmentInstanceState::Cancel() {
-  // Make sure Prepare() finished. We don't care about the status since the query is
-  // being cancelled.
-  discard_result(WaitForPrepare());
-
   DCHECK(runtime_state_ != nullptr);
   runtime_state_->set_is_cancelled();
   if (root_sink_ != nullptr) root_sink_->Cancel(runtime_state_);
@@ -110,7 +122,7 @@ void FragmentInstanceState::Cancel() {
 }
 
 Status FragmentInstanceState::Prepare() {
-  DCHECK(!prepared_promise_.IsSet());
+  DCHECK_EQ(current_state_.Load(), TFInstanceExecState::WAITING_FOR_EXEC);
   VLOG(2) << "fragment_instance_ctx:\n" << ThriftDebugString(instance_ctx_);
 
   // Do not call RETURN_IF_ERROR or explicitly return before this line,
@@ -231,12 +243,10 @@ Status FragmentInstanceState::Prepare() {
     // a race with StopReportThread().
     while (!report_thread_active_) report_thread_started_cv_.Wait(l);
   }
-
   return Status::OK();
 }
 
 Status FragmentInstanceState::Open() {
-  DCHECK(prepared_promise_.IsSet());
   DCHECK(!opened_promise_.IsSet());
   SCOPED_TIMER(profile()->total_time_counter());
   SCOPED_TIMER(ADD_TIMER(timings_profile_, OPEN_TIMER_NAME));
@@ -273,6 +283,8 @@ Status FragmentInstanceState::Open() {
 }
 
 Status FragmentInstanceState::ExecInternal() {
+  RETURN_IF_ERROR(DebugAction(query_state_->query_options(), "FIS_IN_EXEC_INTERNAL"));
+
   RuntimeProfile::Counter* plan_exec_timer =
       ADD_CHILD_TIMER(timings_profile_, "ExecTreeExecTime", EXEC_TIMER_NAME);
   SCOPED_THREAD_COUNTER_MEASUREMENT(runtime_state_->total_thread_statistics());
@@ -484,14 +496,6 @@ void FragmentInstanceState::ReleaseThreadToken() {
   }
 }
 
-Status FragmentInstanceState::WaitForPrepare() {
-  return prepared_promise_.Get();
-}
-
-bool FragmentInstanceState::IsPrepared() {
-  return prepared_promise_.IsSet();
-}
-
 Status FragmentInstanceState::WaitForOpen() {
   return opened_promise_.Get();
 }
@@ -499,8 +503,6 @@ Status FragmentInstanceState::WaitForOpen() {
 void FragmentInstanceState::PublishFilter(const TPublishFilterParams& params) {
   VLOG_FILE << "PublishFilter(): instance_id=" << PrintId(instance_id())
             << " filter_id=" << params.filter_id;
-  // Wait until Prepare() is done, so we know that the filter bank is set up.
-  if (!WaitForPrepare().ok()) return;
   runtime_state_->filter_bank()->PublishGlobalFilter(params);
 }
 
