@@ -126,10 +126,6 @@ message FragmentInstanceExecStatusPB {
   // required in V1
   optional bool done = 3;
 
-  // Sidecar index of the cumulative profile
-  // required in V1
-  optional int32 thrift_profile_sidecar_idx = 4;
-
   // The current state of this fragment instance's execution.
   // required in V1
   optional FInstanceExecStatePB current_state = 5;
@@ -167,6 +163,10 @@ message ReportExecStatusRequestPB {
   // 'instance_exec_status' list.
   // This status is only OK if all fragment instances included are OK.
   optional StatusPB status = 7;
+
+  // Sidecar index of the cumulative profile
+  // required in V1
+  optional int32 thrift_profile_sidecar_idx = 8;
 }
 
 message ReportExecStatusResponsePB {

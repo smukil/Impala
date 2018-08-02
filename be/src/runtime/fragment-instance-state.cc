@@ -49,8 +49,6 @@
 #include "util/periodic-counter-updater.h"
 #include "gen-cpp/ImpalaInternalService_types.h"
 
-DEFINE_int32(status_report_interval, 5, "interval between profile reports; in seconds");
-
 using namespace impala;
 using namespace apache::thrift;
 
@@ -102,8 +100,7 @@ Status FragmentInstanceState::Exec() {
     query_state_->ErrorDuringExecute(status, instance_id());
     goto done;
   }
-  // Tell the managing 'QueryState' that we're done with executing and that we've stopped
-  // the reporting thread.
+  // Tell the managing 'QueryState' that we're done with executing.
   query_state_->DoneExecuting();
 
 done:
@@ -122,7 +119,7 @@ void FragmentInstanceState::Cancel() {
 }
 
 Status FragmentInstanceState::Prepare() {
-  DCHECK_EQ(current_state_.Load(), TFInstanceExecState::WAITING_FOR_EXEC);
+  DCHECK_EQ(current_state_.Load(), FInstanceExecStatePB::WAITING_FOR_EXEC);
   VLOG(2) << "fragment_instance_ctx:\n" << ThriftDebugString(instance_ctx_);
 
   // Do not call RETURN_IF_ERROR or explicitly return before this line,
@@ -232,18 +229,37 @@ Status FragmentInstanceState::Prepare() {
         runtime_state_->instance_mem_tracker()));
   VLOG(2) << "plan_root=\n" << exec_tree_->DebugString();
 
-  // We need to start the profile-reporting thread before calling Open(),
-  // since it may block.
-  if (FLAGS_status_report_interval > 0) {
-    string thread_name = Substitute("profile-report (finst:$0)", PrintId(instance_id()));
-    unique_lock<mutex> l(report_thread_lock_);
-    RETURN_IF_ERROR(Thread::Create(FragmentInstanceState::FINST_THREAD_GROUP_NAME,
-        thread_name, [this]() { this->ReportProfileThread(); }, &report_thread_, true));
-    // Make sure the thread started up, otherwise ReportProfileThread() might get into
-    // a race with StopReportThread().
-    while (!report_thread_active_) report_thread_started_cv_.Wait(l);
-  }
   return Status::OK();
+}
+
+void FragmentInstanceState::GetStatusReport(FragmentInstanceExecStatusPB* instance_status,
+    vector<TRuntimeProfileTree>* profiles_list, ReportExecStatusRequestPB* report) {
+   // Update the counter for the peak per host mem usage.
+  if (per_host_mem_usage_ != nullptr) {
+    per_host_mem_usage_->Set(runtime_state()->query_mem_tracker()->peak_consumption());
+  }
+  UniqueIdPB* finstance_id_pb = instance_status->mutable_fragment_instance_id();
+  finstance_id_pb->set_lo(instance_id().lo);
+  finstance_id_pb->set_hi(instance_id().hi);
+
+  instance_status->set_done(IsDone());
+  instance_status->set_current_state(current_state());
+  DCHECK(profile() != nullptr);
+
+  profiles_list->push_back(TRuntimeProfileTree());
+  TRuntimeProfileTree* thrift_profile = &profiles_list->back();
+  profile()->ToThrift(thrift_profile);
+ 
+  // Only send updates to insert status if fragment is finished, the coordinator waits
+  // until query execution is done to use them anyhow.
+  //RuntimeState* state = runtime_state();
+  // TODO: We shouldn't overwrite 'report->mutable_insert_exec_status()'.
+  //if (done) state->dml_exec_state()->ToProto(report->mutable_insert_exec_status());
+
+  // TODO: Move to FragmentInstanceState::GetUnreportedErrors() 
+  // Send new errors to coordinator
+  //state->GetUnreportedErrors(&instance_status.error_log);
+  //instance_status.__isset.error_log = (instance_status.error_log.size() > 0);
 }
 
 Status FragmentInstanceState::Open() {
@@ -306,15 +322,12 @@ Status FragmentInstanceState::ExecInternal() {
   } while (!exec_tree_complete);
 
   UpdateState(StateEvent::LAST_BATCH_SENT);
-  // Flush the sink *before* stopping the report thread. Flush may need to add some
-  // important information to the last report that gets sent. (e.g. table sinks record the
-  // files they have written to in this method)
+  // Flush the sink as a final step.
   RETURN_IF_ERROR(sink_->FlushFinal(runtime_state()));
   return Status::OK();
 }
 
 void FragmentInstanceState::Close() {
-  DCHECK(!report_thread_active_);
   DCHECK(runtime_state_ != nullptr);
 
   // guard against partially-finished Prepare()
@@ -347,51 +360,6 @@ void FragmentInstanceState::Close() {
     DCHECK_LE(other_time, total_time + 3);
   }
 #endif
-}
-
-void FragmentInstanceState::ReportProfileThread() {
-  VLOG_FILE << "ReportProfileThread(): instance_id=" << PrintId(instance_id());
-  unique_lock<mutex> l(report_thread_lock_);
-  // tell Prepare() that we started
-  report_thread_active_ = true;
-  report_thread_started_cv_.NotifyOne();
-
-  // Jitter the reporting time of remote fragments by a random amount between
-  // 0 and the report_interval.  This way, the coordinator doesn't get all the
-  // updates at once so its better for contention as well as smoother progress
-  // reporting.
-  int report_fragment_offset = rand() % FLAGS_status_report_interval;
-  // We don't want to wait longer than it takes to run the entire fragment.
-  stop_report_thread_cv_.WaitFor(l, report_fragment_offset * MICROS_PER_SEC);
-
-  while (report_thread_active_) {
-    // timed_wait can return because the timeout occurred or the condition variable
-    // was signaled.  We can't rely on its return value to distinguish between the
-    // two cases (e.g. there is a race here where the wait timed out but before grabbing
-    // the lock, the condition variable was signaled).  Instead, we will use an external
-    // flag, report_thread_active_, to coordinate this.
-    stop_report_thread_cv_.WaitFor(l, FLAGS_status_report_interval * MICROS_PER_SEC);
-
-    if (!report_thread_active_) break;
-    SendReport(false, Status::OK());
-  }
-
-  VLOG_FILE << "exiting reporting thread: instance_id=" << PrintId(instance_id());
-}
-
-void FragmentInstanceState::SendReport(bool done, const Status& status) {
-  DCHECK(status.ok() || done);
-  DCHECK(runtime_state_ != nullptr);
-
-  VLOG_FILE << "Reporting " << (done ? "final " : "") << "profile for instance "
-      << PrintId(runtime_state_->fragment_instance_id());
-
-  // Update the counter for the peak per host mem usage.
-  if (per_host_mem_usage_ != nullptr) {
-    per_host_mem_usage_->Set(runtime_state()->query_mem_tracker()->peak_consumption());
-  }
-
-  query_state_->ReportExecStatus(done, status, this);
 }
 
 void FragmentInstanceState::UpdateState(const StateEvent event)
@@ -458,20 +426,9 @@ void FragmentInstanceState::UpdateState(const StateEvent event)
       DCHECK(false) << "Unexpected Event: " << static_cast<int>(event);
       break;
   }
-  // current_state_ is an AtomicEnum to add memory barriers for concurrent reads by the
-  // profile reporting thread. This method is the only one updating it and is not
-  // meant to be thread safe.
+  // This method is the only one updating 'current_state_' and is not meant to be thread
+  // safe.
   if (next_state != current_state) current_state_.Store(next_state);
-}
-
-void FragmentInstanceState::StopReportThread() {
-  if (!report_thread_active_) return;
-  {
-    lock_guard<mutex> l(report_thread_lock_);
-    report_thread_active_ = false;
-  }
-  stop_report_thread_cv_.NotifyOne();
-  report_thread_->Join();
 }
 
 void FragmentInstanceState::Finalize(const Status& status) {
@@ -479,9 +436,6 @@ void FragmentInstanceState::Finalize(const Status& status) {
     // if we haven't already release this thread token in Prepare(), release it now
     ReleaseThreadToken();
   }
-  StopReportThread();
-  // It's safe to send final report now that the reporting thread is stopped.
-  SendReport(true, status);
 }
 
 void FragmentInstanceState::ReleaseThreadToken() {

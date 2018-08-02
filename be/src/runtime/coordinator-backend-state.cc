@@ -243,7 +243,7 @@ inline bool Coordinator::BackendState::IsDone() const {
 
 bool Coordinator::BackendState::ApplyExecStatusReport(
     const ReportExecStatusRequestPB& backend_exec_status,
-    const TRuntimeProfileTree& thrift_profile, ExecSummary* exec_summary,
+    const TRuntimeProfileForest& thrift_profiles, ExecSummary* exec_summary,
     ProgressUpdater* scan_range_progress) {
   lock_guard<SpinLock> l1(exec_summary->lock);
   lock_guard<mutex> l2(lock_);
@@ -263,8 +263,8 @@ bool Coordinator::BackendState::ApplyExecStatusReport(
     // Ignore duplicate or out-of-order messages.
     if (instance_stats->done_) continue;
 
-    instance_stats->Update(
-        instance_exec_status, thrift_profile, exec_summary, scan_range_progress);
+    instance_stats->Update(instance_exec_status, thrift_profiles.profile_tree[i],
+        exec_summary, scan_range_progress);
     if (instance_stats->peak_mem_counter_ != nullptr) {
       // protect against out-of-order status updates
       peak_consumption_ =

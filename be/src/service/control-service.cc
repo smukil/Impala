@@ -86,34 +86,31 @@ void ControlService::ReportExecStatus(const ReportExecStatusRequestPB* request,
     return;
   }
 
-  DCHECK_EQ(request->instance_exec_status_size(), 1);
-  TRuntimeProfileTree thrift_profile;
-  const FragmentInstanceExecStatusPB& instance_exec_status =
-      request->instance_exec_status(0);
+  TRuntimeProfileForest thrift_profiles;
   // The runtime profile is sent as a Thrift serialized buffer via sidecar. Get the
   // sidecar and deserialize the thrift profile if there is any. The sender may have
   // failed to serialize the Thrift profile so an empty thrift profile is valid.
   // TODO: Fix IMPALA-7232 to indicate incomplete profile in this case.
-  if (LIKELY(instance_exec_status.has_thrift_profile_sidecar_idx())) {
+  if (LIKELY(request->has_thrift_profile_sidecar_idx())) {
     kudu::Slice thrift_profile_slice;
     kudu::Status sidecar_status = rpc_context->GetInboundSidecar(
-        instance_exec_status.thrift_profile_sidecar_idx(), &thrift_profile_slice);
+        request->thrift_profile_sidecar_idx(), &thrift_profile_slice);
     CHECK(sidecar_status.ok())
         << FromKuduStatus(sidecar_status, "Failed to get sidecar").GetDetail();
     uint32_t len = thrift_profile_slice.size();
     Status deserialize_status =
-        DeserializeThriftMsg(thrift_profile_slice.data(), &len, true, &thrift_profile);
+        DeserializeThriftMsg(thrift_profile_slice.data(), &len, true, &thrift_profiles);
     if (UNLIKELY(!deserialize_status.ok())) {
       LOG(ERROR) << "ReportExecStatus(): Failed to deserialize profile for query ID "
                  << PrintId(query_id) << " : " << deserialize_status.GetDetail();
       // Swap with an empty profile if we fail to deserialize the profile to avoid using
       // a partially populated profile.
-      TRuntimeProfileTree empty_profile;
-      swap(thrift_profile, empty_profile);
+      TRuntimeProfileForest empty_profile;
+      swap(thrift_profiles, empty_profile);
     }
   }
 
-  Status status = request_state->UpdateBackendExecStatus(*request, thrift_profile);
+  Status status = request_state->UpdateBackendExecStatus(*request, thrift_profiles);
   status.ToProto(response->mutable_status());
   // Release the memory against the control service's memory tracker.
   mem_tracker_->Release(rpc_context->GetTransferSize());

@@ -662,7 +662,7 @@ void Coordinator::CancelBackends() {
 }
 
 Status Coordinator::UpdateBackendExecStatus(const ReportExecStatusRequestPB& request,
-    const TRuntimeProfileTree& thrift_profile) {
+    const TRuntimeProfileForest& thrift_profiles) {
   const int32_t coord_state_idx = request.coord_state_idx();
   VLOG_FILE << "UpdateBackendExecStatus() query_id=" << PrintId(query_id())
             << " backend_idx=" << coord_state_idx;
@@ -678,7 +678,7 @@ Status Coordinator::UpdateBackendExecStatus(const ReportExecStatusRequestPB& req
     dml_exec_state_.Update(request.insert_exec_status());
   }
 
-  if (backend_state->ApplyExecStatusReport(request, thrift_profile, &exec_summary_,
+  if (backend_state->ApplyExecStatusReport(request, thrift_profiles, &exec_summary_,
           &progress_)) {
     // This backend execution has completed.
     if (VLOG_QUERY_IS_ON) {

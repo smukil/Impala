@@ -152,6 +152,12 @@ class QueryState {
   /// Not idempotent, not thread-safe. Must only be called by the QueryState thread.
   void StartFInstances();
 
+  /// Monitors the execution of all underlying fragment instances and updates the query
+  /// state accordingly. This is also responsible for periodic status reporting back to
+  /// the coordinator. Not idempotent, not thread-safe. Must only be called by the
+  /// QueryState thread.
+  void MonitorFInstances();
+
   /// Blocks until all fragment instances have finished their Prepare phase.
   FragmentInstanceState* GetFInstanceState(const TUniqueId& instance_id);
 
@@ -172,14 +178,6 @@ class QueryState {
   /// Should be called by the owner of the refcount after it is done consuming query
   /// execution resources.
   void ReleaseExecResourceRefcount();
-
-  /// Sends a ReportExecStatus rpc to the coordinator. If fis == nullptr, the
-  /// status must be an error. If fis is given, the content will depend on whether
-  /// the fis has finished its Prepare phase. It sends a report for the instance,
-  /// and it will include the profile if the fis is prepared. If the fis is not
-  /// prepared, the status must be an error.
-  /// If there is an error during the rpc, initiates cancellation.
-  void ReportExecStatus(bool done, const Status& status, FragmentInstanceState* fis);
 
   /// Checks whether spilling is enabled for this query. Must be called before the first
   /// call to BufferPool::Unpin() for the query. Returns OK if spilling is enabled. If
@@ -218,7 +216,7 @@ class QueryState {
 
   /// Called by a fragment instance thread to notify that it hit an error during Execute()
   /// Updates the query status and records the failed instance ID if they're not set
-  /// already. Also notifies anyone waiting on WaitForFinish().
+  /// already. Also notifies anyone waiting on WaitForFinishOrTimeout().
   void ErrorDuringExecute(const Status& status, const TUniqueId& finst_id) {
     // Do a racy check to avoid getting the lock if an error is already set.
     if (query_status_.ok()) {
@@ -240,11 +238,10 @@ class QueryState {
 
   static const int DEFAULT_BATCH_SIZE = 1024;
 
-  /// Return overall status of all fragment instances during execution. A failure
-  /// in any instance's execution (after Prepare()) will cause this function
-  /// to return an error status. Blocks until all fragment instances have finished
-  /// executing or until one of them hits an error.
-  Status WaitForFinish();
+  /// Blocks until all fragment instances have finished executing or until one of them
+  /// hits an error, or until 'timeout_seconds' has elapsed.
+  /// Returns 'false' if it timed-out. Returns 'true' otherwise.
+  bool WaitForFinishOrTimeout(int32_t timeout_seconds);
 
   /// States that a query goes through during its lifecycle.
   enum class BackendExecState {
@@ -268,6 +265,8 @@ class QueryState {
   /// Current state of this query in this executor.
   /// Thread-safety: Only updated by the QueryState thread.
   BackendExecState backend_exec_state_ = BackendExecState::PREPARING;
+
+  void HandleExecStateTransition(BackendExecState old_state, BackendExecState new_state);
 
   /// Updates the BackendExecState based on 'query_status_'. A state transition happens
   /// if the current state is a non-terminal state; the transition can either be to the
@@ -391,13 +390,11 @@ class QueryState {
   /// sent to the coordinator. The runtime profile is serialized by the Thrift serializer
   /// 'serializer' and stored in 'profile_str'.
   void ConstructReport(bool done, const Status& status,
-      FragmentInstanceState* fis, ReportExecStatusRequestPB* report,
+      bool instances_started, ReportExecStatusRequestPB* report,
       ThriftSerializer* serializer, string* profile_str);
 
-  /// Same behavior as ReportExecStatus().
-  /// Cancel on error only if instances_started is true.
-  void ReportExecStatusAux(bool done, const Status& status, FragmentInstanceState* fis,
-      bool instances_started);
+  /// Sends a ReportExecStatus rpc to the coordinator.
+  void ReportExecStatusAux();
 };
 }
 
