@@ -444,6 +444,9 @@ class MemTracker {
   /// in bytes; not owned
   RuntimeProfile::HighWaterMarkCounter* consumption_;
 
+  int64_t child_peak_mem_ = 0;
+  int64_t peak_untracked_mem_ = 0;
+
   /// holds consumption_ counter if not tied to a profile
   RuntimeProfile::HighWaterMarkCounter local_counter_;
 

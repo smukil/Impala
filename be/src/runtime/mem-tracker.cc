@@ -343,7 +343,7 @@ string MemTracker::LogUsage(int max_recursive_depth, const string& prefix,
         child_trackers_, &child_consumption);
   }
   if (!child_trackers_usage.empty()) ss << "\n" << child_trackers_usage;
-
+  if (child_consumption > child_peak_mem_) child_peak_mem_ = child_consumption;
   if (parent_ == nullptr) {
     // Log the difference between the metric value and children as "untracked" memory so
     // that the values always add up. This value is not always completely accurate because
@@ -353,6 +353,13 @@ string MemTracker::LogUsage(int max_recursive_depth, const string& prefix,
     ss << "\n"
        << new_prefix << "Untracked Memory: Total="
        << PrettyPrinter::Print(untracked_bytes, TUnit::BYTES);
+    int64_t peak_untracked_bytes = peak_consumption - child_peak_mem_;
+    if (peak_untracked_bytes > peak_untracked_mem_) {
+      peak_untracked_mem_ = peak_untracked_bytes;
+    }
+    ss << "\n"
+       << new_prefix << "Peak Untracked Memory: Total="
+       << PrettyPrinter::Print(peak_untracked_mem_, TUnit::BYTES);
   }
   return ss.str();
 }
