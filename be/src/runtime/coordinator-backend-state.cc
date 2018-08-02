@@ -244,13 +244,18 @@ inline bool Coordinator::BackendState::IsDone() const {
 
 bool Coordinator::BackendState::ApplyExecStatusReport(
     const ReportExecStatusRequestPB& backend_exec_status,
-    const TRuntimeProfileTree& thrift_profile, ExecSummary* exec_summary,
+    const TRuntimeProfileForest& thrift_profiles, ExecSummary* exec_summary,
     ProgressUpdater* scan_range_progress) {
   unique_lock<mutex> lock(lock_);
   last_report_time_ms_ = MonotonicMillis();
 
   // If this backend completed previously, don't apply the update.
   if (IsDone()) return false;
+  int i = 0;
+  int num_profiles = thrift_profiles.profile_tree.size();
+
+  // Keep an empty profile if the backend failed to serialize the thrift profiles.
+  TRuntimeProfileTree empty_profile;
   for (const FragmentInstanceExecStatusPB& instance_exec_status :
            backend_exec_status.instance_exec_status()) {
     int32_t report_version = instance_exec_status.report_version();
@@ -262,18 +267,26 @@ bool Coordinator::BackendState::ApplyExecStatusReport(
     // Ignore duplicate or out-of-order messages.
     if (instance_stats->done_ ||
         report_version <= instance_stats->last_report_version_) {
-      DCHECK(!instance_stats->done_ ||
-          report_version == instance_stats->last_report_version_);
+      //DCHECK(!instance_stats->done_ ||
+      //    report_version == instance_stats->last_report_version_) << "Report versoin: "
+      //        << report_version << " | Last report version: " << instance_stats->last_report_version_
+      //        << " | Done? " << instance_stats->done_;
       continue;
     }
 
-    instance_stats->Update(
-        instance_exec_status, thrift_profile, exec_summary, scan_range_progress);
+    if (num_profiles == 0) {
+      instance_stats->Update(instance_exec_status, empty_profile, exec_summary,
+          scan_range_progress);
+    } else {
+      instance_stats->Update(instance_exec_status, thrift_profiles.profile_tree[i],
+          exec_summary, scan_range_progress);
+    }
     if (instance_stats->peak_mem_counter_ != nullptr) {
       // protect against out-of-order status updates
       peak_consumption_ =
           max(peak_consumption_, instance_stats->peak_mem_counter_->value());
     }
+    ++i;
 
     if (instance_exec_status.has_insert_exec_status()) {
       coord_dml_exec_state_->Update(instance_exec_status.insert_exec_status());

@@ -125,6 +125,7 @@ QueryState* QueryExecMgr::GetOrCreateQueryState(
 
 void QueryExecMgr::StartQueryHelper(QueryState* qs) {
   qs->StartFInstances();
+  qs->MonitorFInstances();
 
 #if !defined(ADDRESS_SANITIZER) && !defined(THREAD_SANITIZER)
   // tcmalloc and address or thread sanitizer cannot be used together
